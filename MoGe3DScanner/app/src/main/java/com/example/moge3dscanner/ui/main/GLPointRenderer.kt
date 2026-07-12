@@ -132,8 +132,8 @@ class GLPointRenderer : GLSurfaceView.Renderer {
         val scratch = FloatArray(16)
         val modelMatrix = FloatArray(16)
         Matrix.setIdentityM(modelMatrix, 0)
-        Matrix.rotateM(modelMatrix, 0, angleX, 0f, 1f, 0f)
-        Matrix.rotateM(modelMatrix, 0, angleY, 1f, 0f, 0f)
+        Matrix.rotateM(modelMatrix, 0, angleY, 1f, 0f, 0f)   // tilt (up/down) in model space first
+        Matrix.rotateM(modelMatrix, 0, angleX, 0f, 1f, 0f)   // spin (left/right) around world Y last
         Matrix.translateM(modelMatrix, 0, -centerX, -centerY, -centerZ)
 
         // Multiply: View * Model
