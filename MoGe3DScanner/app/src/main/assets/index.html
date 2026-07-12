@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Live 3D Scanner</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono&display=swap" />
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 16px;
+    background-color: #f7f6f2;
+    color: #0a0a0b;
+    font-family: 'Inter', sans-serif;
+    display: flex;
+    justify-content: center;
+    min-height: 100vh;
+  }
+  .container {
+    width: 100%;
+    max-width: 540px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  h1 {
+    font-size: 22px;
+    font-weight: 600;
+    margin: 8px 0 0;
+    text-align: center;
+    background: linear-gradient(45deg, #956820, #c88a30);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .controls {
+    display: flex;
+    gap: 12px;
+  }
+  button {
+    flex: 1;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    font-weight: 600;
+    background-color: #956820;
+    color: #ffffff;
+    border: none;
+    padding: 14px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: opacity 0.2s ease;
+  }
+  button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+  #downloadBtn {
+    background-color: #ffffff;
+    color: #2a2a2e;
+    border: 1px solid rgba(10, 10, 11, 0.15);
+  }
+  #status {
+    background-color: #ffffff;
+    border: 1px solid rgba(10, 10, 11, 0.08);
+    border-radius: 8px;
+    padding: 12px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: #5a5a60;
+    line-height: 1.5;
+    white-space: pre-wrap;
+  }
+  .viewports {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .viewport-box {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 1;
+    border: 1px solid rgba(10, 10, 11, 0.08);
+    border-radius: 12px;
+    overflow: hidden;
+    background-color: #ffffff;
+  }
+  .viewport-label {
+    position: absolute;
+    top: 12px;
+    left: 12px;
+    background: rgba(247, 246, 242, 0.95);
+    border: 1px solid rgba(10, 10, 11, 0.08);
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: #737378;
+    z-index: 2;
+  }
+  video, canvas {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+</style>
+</head>
+<body>
+  <div class="container">
+    <h1>Live 3D Scanner</h1>
+    
+    <div class="controls">
+      <button id="liveCameraBtn" disabled>Loading Model...</button>
+      <button id="downloadBtn" disabled>Download GLB</button>
+    </div>
+
+    <pre id="status">Initializing system...</pre>
+
+    <div class="viewports">
+      <div class="viewport-box">
+        <div class="viewport-label">CAMERA FEED</div>
+        <video id="cameraVideo" autoplay playsinline></video>
+      </div>
+      
+      <div class="viewport-box">
+        <div class="viewport-label">3D POINT CLOUD</div>
+        <canvas id="liveThreeCanvas"></canvas>
+      </div>
+    </div>
+  </div>
+
+<script type="module">
+import { loadLiteRt, loadAndCompile, Tensor } from 'https://cdn.jsdelivr.net/npm/@litertjs/core@2.5.2/+esm';
+import * as THREE from 'https://esm.sh/three@0.160.0';
+import { GLTFExporter } from 'https://esm.sh/three@0.160.0/examples/jsm/exporters/GLTFExporter.js';
+import { OrbitControls } from 'https://esm.sh/three@0.160.0/examples/jsm/controls/OrbitControls.js';
+
+const RESOLUTION = 518;
+const MODEL_URL = 'moge_v2_fp16.tflite';
+
+const statusEl = document.getElementById('status');
+const liveCameraBtn = document.getElementById('liveCameraBtn');
+const downloadBtn = document.getElementById('downloadBtn');
+const cameraVideo = document.getElementById('cameraVideo');
+const liveThreeCanvas = document.getElementById('liveThreeCanvas');
+
+let model = null;
+let activeAccelerator = null;
+let currentStream = null;
+let animationFrameId = null;
+let isLive = false;
+
+let renderer = null, scene = null, camera = null, pointsMesh = null, controls = null;
+
+// Reusable offscreen canvas & input buffer to prevent garbage collection memory churn
+let offscreenCanvas = null;
+let offscreenCtx = null;
+let inputBuffer = null;
+
+function setStatus(msg) {
+  statusEl.textContent = msg;
+  console.log('[Scanner]', msg);
+}
+
+function downloadModelWithProgress(url) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('GET', url, true);
+    xhr.responseType = 'arraybuffer';
+    
+    const startTime = performance.now();
+    let lastTime = startTime;
+    let lastLoaded = 0;
+    
+    xhr.onprogress = function(event) {
+      if (event.lengthComputable) {
+        const loadedBytes = event.loaded;
+        const totalBytes = event.total;
+        
+        const currentTime = performance.now();
+        const intervalElapsed = (currentTime - lastTime) / 1000;
+        
+        if (intervalElapsed >= 0.5 || loadedBytes === totalBytes) {
+          const speedBps = (loadedBytes - lastLoaded) / intervalElapsed;
+          const speedMBs = speedBps / (1024 * 1024);
+          const percent = ((loadedBytes / totalBytes) * 100).toFixed(1);
+          const loadedMB = (loadedBytes / (1024 * 1024)).toFixed(1);
+          const totalMB = (totalBytes / (1024 * 1024)).toFixed(1);
+          
+          setStatus(`Loading MoGe-2 3D Model...\nProgress: ${percent}% (${loadedMB}/${totalMB} MB)\nSpeed: ${speedMBs.toFixed(2)} MB/s`);
+          
+          lastTime = currentTime;
+          lastLoaded = loadedBytes;
+        }
+      }
+    };
+    
+    xhr.onload = function() {
+      // Local file protocol returns status 0 on success
+      if (xhr.status === 200 || (xhr.status === 0 && xhr.response && xhr.response.byteLength > 0)) {
+        resolve(new Uint8Array(xhr.response));
+      } else {
+        reject(new Error(`Model load failed: status ${xhr.status}`));
+      }
+    };
+    
+    xhr.onerror = function() {
+      reject(new Error('Network error or file access blocked.'));
+    };
+    
+    xhr.send();
+  });
+}
+
+async function loadRuntimeAndModel() {
+  try {
+    setStatus('Loading LiteRT.js WASM runtime...');
+    await loadLiteRt('https://cdn.jsdelivr.net/npm/@litertjs/core@2.5.2/wasm/', { jspi: true });
+
+    const modelBytes = await downloadModelWithProgress(MODEL_URL);
+
+    // Auto-detect and compile with WebGPU, fallback to WebAssembly
+    try {
+      setStatus('Compiling model with WebGPU...');
+      model = await loadAndCompile(modelBytes, { accelerator: 'webgpu' });
+      activeAccelerator = 'webgpu';
+    } catch (err) {
+      console.warn('WebGPU not supported or failed to compile. Falling back to WASM.', err);
+      setStatus('WebGPU failed. Compiling model with WebAssembly...');
+      model = await loadAndCompile(modelBytes, { accelerator: 'wasm' });
+      activeAccelerator = 'wasm';
+    }
+
+    setStatus(`System Ready.\nAccelerator: ${activeAccelerator}\nPress 'Start Live Camera' to scan.`);
+    liveCameraBtn.disabled = false;
+    liveCameraBtn.textContent = 'Start Live Camera';
+  } catch (err) {
+    setStatus(`Initialization error: ${err.message}`);
+  }
+}
+
+function initThreeScene() {
+  if (scene) return;
+  scene = new THREE.Scene();
+
+  camera = new THREE.PerspectiveCamera(45, liveThreeCanvas.clientWidth / liveThreeCanvas.clientHeight, 0.1, 100);
+  camera.position.set(0, 0, 3);
+
+  renderer = new THREE.WebGLRenderer({ canvas: liveThreeCanvas, antialias: true });
+  renderer.setSize(liveThreeCanvas.clientWidth, liveThreeCanvas.clientHeight, false);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setClearColor(0xf7f6f2, 1);
+
+  controls = new OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.05;
+
+  const geometry = new THREE.BufferGeometry();
+  const subsample = 4; // Subsample points for performance on mobile devices
+  const numPoints = Math.ceil(RESOLUTION / subsample) * Math.ceil(RESOLUTION / subsample);
+
+  const positions = new Float32Array(numPoints * 3);
+  const colors = new Float32Array(numPoints * 3);
+
+  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+  const material = new THREE.PointsMaterial({ size: 0.01, vertexColors: true });
+  pointsMesh = new THREE.Points(geometry, material);
+  scene.add(pointsMesh);
+
+  function animate() {
+    if (!isLive) return;
+    requestAnimationFrame(animate);
+    controls.update();
+    renderer.render(scene, camera);
+  }
+  animate();
+}
+
+async function toggleCamera() {
+  if (isLive) {
+    isLive = false;
+    liveCameraBtn.textContent = 'Start Live Camera';
+    if (currentStream) {
+      currentStream.getTracks().forEach(track => track.stop());
+      currentStream = null;
+    }
+    if (animationFrameId) {
+      cancelAnimationFrame(animationFrameId);
+      animationFrameId = null;
+    }
+    setStatus('Scan stopped.');
+  } else {
+    setStatus('Accessing device camera...');
+    try {
+      currentStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment', width: 518, height: 518 }
+      });
+      cameraVideo.srcObject = currentStream;
+      
+      initThreeScene();
+      isLive = true;
+      liveCameraBtn.textContent = 'Stop Live Camera';
+      downloadBtn.disabled = false;
+      setStatus(`Scanning in real-time...\nAccelerator: ${activeAccelerator}`);
+      
+      animationFrameId = requestAnimationFrame(inferenceLoop);
+    } catch (err) {
+      setStatus(`Camera capture error: ${err.message}`);
+    }
+  }
+}
+
+async function readTensorAndClean(t) {
+  const cpu = t.accelerator === 'wasm' ? t : await t.moveTo('wasm');
+  const out = cpu.toTypedArray().slice();
+  if (cpu !== t) {
+    cpu.delete();
+  }
+  return out;
+}
+
+async function inferenceLoop() {
+  if (!isLive || !model) return;
+
+  try {
+    // Initialise reusable canvas & buffer once
+    if (!offscreenCanvas) {
+      offscreenCanvas = document.createElement('canvas');
+      offscreenCanvas.width = RESOLUTION;
+      offscreenCanvas.height = RESOLUTION;
+      offscreenCtx = offscreenCanvas.getContext('2d', { willReadFrequently: true });
+      inputBuffer = new Float32Array(RESOLUTION * RESOLUTION * 3);
+    }
+
+    // Render current video frame to the offscreen canvas
+    offscreenCtx.drawImage(cameraVideo, 0, 0, RESOLUTION, RESOLUTION);
+    const imgData = offscreenCtx.getImageData(0, 0, RESOLUTION, RESOLUTION).data;
+
+    // Normalise RGB directly into the reusable inputBuffer
+    for (let i = 0, j = 0; i < imgData.length; i += 4) {
+      inputBuffer[j++] = imgData[i] / 255;
+      inputBuffer[j++] = imgData[i + 1] / 255;
+      inputBuffer[j++] = imgData[i + 2] / 255;
+    }
+
+    const inputTensor = new Tensor(inputBuffer, [1, RESOLUTION, RESOLUTION, 3]);
+    const outputs = await model.run([inputTensor]);
+
+    const pointsTensor = outputs.find(t => t.type.layout.dimensions.length === 4);
+    const pointsData = await readTensorAndClean(pointsTensor);
+
+    const stride = 4;
+    const posAttr = pointsMesh.geometry.getAttribute('position');
+    const colAttr = pointsMesh.geometry.getAttribute('color');
+
+    let idx = 0;
+    for (let y = 0; y < RESOLUTION; y += stride) {
+      for (let x = 0; x < RESOLUTION; x += stride) {
+        const i = y * RESOLUTION + x;
+        const px = pointsData[i * 3];
+        const py = pointsData[i * 3 + 1];
+        const pz = pointsData[i * 3 + 2];
+
+        if (isFinite(pz) && pz > 0) {
+          posAttr.setXYZ(idx, px, -py, pz);
+          colAttr.setXYZ(idx, imgData[i * 4] / 255, imgData[i * 4 + 1] / 255, imgData[i * 4 + 2] / 255);
+        } else {
+          posAttr.setXYZ(idx, 0, 0, 0);
+          colAttr.setXYZ(idx, 0, 0, 0);
+        }
+        idx++;
+      }
+    }
+
+    posAttr.needsUpdate = true;
+    colAttr.needsUpdate = true;
+
+    // Delete all GPU/WebGPU output tensors to prevent leak
+    outputs.forEach(t => {
+      if (typeof t.delete === 'function') {
+        t.delete();
+      }
+    });
+
+    inputTensor.delete();
+  } catch (err) {
+    console.error('Inference error:', err);
+  }
+
+  if (isLive) {
+    animationFrameId = requestAnimationFrame(inferenceLoop);
+  }
+}
+
+async function exportGlb() {
+  if (!pointsMesh) return;
+  setStatus('Generating GLB file...');
+  const exporter = new GLTFExporter();
+  const glbBuffer = await new Promise((resolve, reject) => {
+    exporter.parse(
+      pointsMesh,
+      res => resolve(res),
+      err => reject(err),
+      { binary: true }
+    );
+  });
+  
+  const blob = new Blob([glbBuffer], { type: 'model/gltf-binary' });
+  const url = URL.createObjectURL(blob);
+  
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'live_scan.glb';
+  a.click();
+  
+  setStatus('GLB exported successfully!');
+  setTimeout(() => setStatus(`Scanning in real-time...\nAccelerator: ${activeAccelerator}`), 2000);
+}
+
+window.addEventListener('resize', () => {
+  if (renderer) {
+    renderer.setSize(liveThreeCanvas.clientWidth, liveThreeCanvas.clientHeight, false);
+    camera.aspect = liveThreeCanvas.clientWidth / liveThreeCanvas.clientHeight;
+    camera.updateProjectionMatrix();
+  }
+});
+
+liveCameraBtn.addEventListener('click', toggleCamera);
+downloadBtn.addEventListener('click', exportGlb);
+
+loadRuntimeAndModel();
+</script>
+</body>
+</html>
