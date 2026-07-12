@@ -71,4 +71,6 @@ adb shell am start -n com.example.moge3dscanner/.MainActivity
   > *3D Live Scanner, initially launched as 3D Scanner for ARCore and originally known as OpenConstructor for Tango, is a trailblazing Android application that pioneered the mobile 3D scanning space. It was among the very first apps designed to capture detailed 3D models of interiors, exteriors, individual objects, and even faces, bringing advanced scanning technology into the hands of everyday users.*
   > *Source*: [Luboš Vonásek Homepage](https://lvonasek.github.io/)
 * **Android CLI & Antigravity CLI**:
-  Development and rapid iteration of this native application were powered by Android Platform-Tools and the **Antigravity CLI** agent platform. The automated build, deployment, screenshot auditing, and remote device command executions allowed fast development cycles directly from the terminal.
+  Development and rapid iteration of this native application were powered by [Android Platform-Tools](https://developer.android.com/tools/releases/platform-tools) and the [Antigravity CLI](https://antigravity.google/docs) agent platform. The automated build, deployment, screenshot auditing, and remote device command executions allowed fast development cycles directly from the terminal.
+* **Pre-compiled Binaries**:
+  The final optimized release version of the application can be downloaded directly as [moge_3d_scanner_v2.zip](moge_3d_scanner_v2.zip).
