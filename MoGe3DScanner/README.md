@@ -99,8 +99,22 @@ adb shell am start -n com.example.moge3dscanner/.MainActivity
   Development and rapid iteration were powered by [Android Platform-Tools](https://developer.android.com/tools/releases/platform-tools) and the [Antigravity CLI](https://antigravity.google/docs) agent platform. Automated build, deployment, screenshot auditing, and remote device command execution enabled fast development cycles directly from the terminal.
 
 * **Pre-compiled Binaries**:
-  Download the latest debug APK: [moge_3d_scanner_v4.zip](moge_3d_scanner_v4.zip)
+  Download the latest debug APK: [moge_3d_scanner_v5.zip](moge_3d_scanner_v5.zip)
 
-### 🔄 Gravity Reset Button (↺)
+### 🔄 UI Control & Modes
 
-![Reset Button visible in bottom row](screenshot_reset_button.png)
+#### 1. Gravity Reset Button (↺) & Multi Mode
+The top-left info panel has been updated to support two modes: Single scan (default) and Multi Mode. Tapping "☐ Multi Mode" enables multi-image 3D scanning.
+
+![UI Panel](screenshot_multi_mode.png)
+
+#### 2. Multi-Image 3D Scanning (Panorama Alignment)
+When **Multi Mode** is enabled, tapping the shutter button captures consecutive views without clearing the point cloud accumulator. Each frame's points are dynamically rotated in the background using the relative rotation matrix between that frame and the baseline (first frame):
+$$P_{aligned} = R_0^T \times R_i \times P_i$$
+
+This allows the user to rotate the camera around a point (like a panorama) to stitch together multiple perspective captures seamlessly in the same coordinate space.
+
+| Frame 1 Captured | Frame 2 (Accumulated Side-by-Side) |
+|---|---|
+| ![Frame 1](screenshot_multi_frame1.png) | ![Frame 2](screenshot_multi_frame2.png) |
+

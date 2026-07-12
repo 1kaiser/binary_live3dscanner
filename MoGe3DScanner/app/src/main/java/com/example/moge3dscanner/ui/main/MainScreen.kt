@@ -156,7 +156,7 @@ class InteractiveGLView(context: Context, val renderer: GLPointRenderer) : GLSur
                         val dy = y - previousY
 
                         renderer.angleX += dx * 0.15f
-                        renderer.angleY -= dy * 0.15f
+                        renderer.angleY += dy * 0.15f
                         requestRender()
                     }
                     previousX = x
@@ -193,6 +193,11 @@ fun MainScreen(
     // Merging accumulator and state
     val accumulator = remember { PointCloudAccumulator() }
     var isAccumulateEnabled by remember { mutableStateOf(false) }
+    var isMultiMode by remember { mutableStateOf(false) }
+    var hasFirstFrame by remember { mutableStateOf(false) }
+    val firstFrameRotationMatrix = remember { FloatArray(9) }
+    val captureRotationMatrix = remember { FloatArray(9) }
+    val isMultiModeSnapshot = remember { AtomicBoolean(false) }
 
     // Capture/Snapshot states
     var isContinuousScanning by remember { mutableStateOf(false) }
@@ -379,20 +384,42 @@ fun MainScreen(
                 fontSize = 9.sp,
                 color = Color(0xFF535358)
             )
-            // Reset orientation button — no border, inline with status panel
-            Text(
-                text = "↺  Reset View",
-                fontFamily = FontFamily.Monospace,
-                fontSize = 9.sp,
-                color = Color(0xFF956820),
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier
-                    .clickable {
+            // Row for Reset View and Multi Mode buttons
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(top = 2.dp)
+            ) {
+                Text(
+                    text = "↺  Reset View",
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 9.sp,
+                    color = Color(0xFF956820),
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.clickable {
                         renderer.resetAngles()
                         glViewRef.value?.requestRender()
                     }
-                    .padding(top = 2.dp)
-            )
+                )
+                Text(
+                    text = if (isMultiMode) "✓  Multi Mode" else "☐  Multi Mode",
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 9.sp,
+                    color = if (isMultiMode) Color(0xFF4CAF50) else Color(0xFF956820),
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.clickable {
+                        isMultiMode = !isMultiMode
+                        if (!isMultiMode) {
+                            hasFirstFrame = false
+                            // Clear accumulator to start fresh in single scan mode
+                            accumulator.clear()
+                            renderer.updatePoints(FloatArray(0), FloatArray(0))
+                            lastPositions = null
+                            lastColors = null
+                        }
+                    }
+                )
+            }
         }
 
         // 3. Play/Pause Continuous Scanning Mode (top-right overlay)
@@ -499,7 +526,18 @@ fun MainScreen(
                                                         glPositions[j * 3 + 2] = -positions[j * 3 + 2]  // Z: into  → toward viewer
                                                     }
 
-                                                    val accumulate = isContinuousScanning
+                                                    if (isMultiModeSnapshot.get()) {
+                                                        val R_i = synchronized(captureRotationMatrix) { captureRotationMatrix.clone() }
+                                                        val R_0 = synchronized(firstFrameRotationMatrix) { firstFrameRotationMatrix.clone() }
+                                                        val R_0_T = transpose3x3(R_0)
+                                                        val R_rel = multiply3x3(R_0_T, R_i)
+                                                        
+                                                        for (j in 0 until numPoints) {
+                                                            rotatePoint3x3(glPositions, j * 3, R_rel)
+                                                        }
+                                                    }
+
+                                                    val accumulate = isContinuousScanning || isMultiModeSnapshot.get()
                                                     accumulator.addFrame(glPositions, colors, accumulate)
                                                     val (mergedPositions, mergedColors) = accumulator.getPositionsAndColors()
                                                     
@@ -709,57 +747,64 @@ fun MainScreen(
                     .clickable(enabled = !isProcessingFrame) {
                         val positions = lastPositions
                         val colors = lastColors
+                        val isMulti = isMultiMode
+                        isMultiModeSnapshot.set(isMulti)
 
-                        //    R (row-major 3x3) maps device-space → world-space (world Z = up).
-                        //    Points are in OpenGL camera-space (X=right, Y=up, Z=toward viewer).
-                        //    Camera→device flip C: col0=[1,0,0], col1=[0,-1,0], col2=[0,0,-1]
-                        //    gravityAlignMatrix = R * C  => col0=R_col0, col1=-R_col1, col2=-R_col2
                         val R = synchronized(rotationMatrix) { rotationMatrix.clone() }
-                        val grav4x4 = FloatArray(16)
-                        // column 0 = R col0 (R is row-major: R[row*3+col])
-                        grav4x4[0]=R[0]; grav4x4[1]=R[3]; grav4x4[2]=R[6]; grav4x4[3]=0f
-                        // column 1 = -R col1
-                        grav4x4[4]=-R[1]; grav4x4[5]=-R[4]; grav4x4[6]=-R[7]; grav4x4[7]=0f
-                        // column 2 = -R col2
-                        grav4x4[8]=-R[2]; grav4x4[9]=-R[5]; grav4x4[10]=-R[8]; grav4x4[11]=0f
-                        // column 3 = translation (none)
-                        grav4x4[12]=0f; grav4x4[13]=0f; grav4x4[14]=0f; grav4x4[15]=1f
-                        System.arraycopy(grav4x4, 0, renderer.gravityAlignMatrix, 0, 16)
-                        renderer.resetAngles()  // reset user rotation to gravity-aligned default
+                        synchronized(captureRotationMatrix) {
+                            System.arraycopy(R, 0, captureRotationMatrix, 0, 9)
+                        }
+
+                        if (!isMulti || !hasFirstFrame) {
+                            synchronized(firstFrameRotationMatrix) {
+                                System.arraycopy(R, 0, firstFrameRotationMatrix, 0, 9)
+                            }
+                            hasFirstFrame = true
+
+                            // Calculate gravityAlignMatrix for the renderer based on first frame
+                            val grav4x4 = FloatArray(16)
+                            grav4x4[0]=R[0]; grav4x4[1]=R[3]; grav4x4[2]=R[6]; grav4x4[3]=0f
+                            grav4x4[4]=-R[1]; grav4x4[5]=-R[4]; grav4x4[6]=-R[7]; grav4x4[7]=0f
+                            grav4x4[8]=-R[2]; grav4x4[9]=-R[5]; grav4x4[10]=-R[8]; grav4x4[11]=0f
+                            grav4x4[12]=0f; grav4x4[13]=0f; grav4x4[14]=0f; grav4x4[15]=1f
+                            System.arraycopy(grav4x4, 0, renderer.gravityAlignMatrix, 0, 16)
+                            renderer.resetAngles()
+                        }
 
                         // 2. Trigger new snapshot
                         shouldTakeSnapshot.set(true)
                         isProcessingFrame = true
 
-                        // 3. Clear previous point cloud before starting new analysis
-                        accumulator.clear()
-                        renderer.updatePoints(FloatArray(0), FloatArray(0))
-                        lastPositions = null
-                        lastColors = null
-                        
-                        // 3. Run GLB export in the background on IO coroutine pool
-                        if (positions != null && colors != null) {
-                            scope.launch(Dispatchers.IO) {
-                                try {
-                                    val glbData = exportGlb(positions, colors, currentLatitude, currentLongitude)
-                                    val contentValues = ContentValues().apply {
-                                        put(MediaStore.MediaColumns.DISPLAY_NAME, "moge_scan_${System.currentTimeMillis()}.glb")
-                                        put(MediaStore.MediaColumns.MIME_TYPE, "model/gltf-binary")
-                                        put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
-                                    }
-                                    val resolver = context.contentResolver
-                                    val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
-                                    if (uri != null) {
-                                        resolver.openOutputStream(uri)?.use { outputStream ->
-                                            outputStream.write(glbData)
+                        // 3. Handle single vs multi mode clearing and auto-export
+                        if (!isMulti) {
+                            accumulator.clear()
+                            renderer.updatePoints(FloatArray(0), FloatArray(0))
+                            lastPositions = null
+                            lastColors = null
+
+                            if (positions != null && colors != null) {
+                                scope.launch(Dispatchers.IO) {
+                                    try {
+                                        val glbData = exportGlb(positions, colors, currentLatitude, currentLongitude)
+                                        val contentValues = ContentValues().apply {
+                                            put(MediaStore.MediaColumns.DISPLAY_NAME, "moge_scan_${System.currentTimeMillis()}.glb")
+                                            put(MediaStore.MediaColumns.MIME_TYPE, "model/gltf-binary")
+                                            put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
                                         }
-                                        withContext(Dispatchers.Main) {
-                                            val gpsTag = if (currentLatitude != null && currentLongitude != null) " (GPS tagged)" else ""
-                                            Toast.makeText(context, "Saved previous scan to GLB!$gpsTag", Toast.LENGTH_SHORT).show()
+                                        val resolver = context.contentResolver
+                                        val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
+                                        if (uri != null) {
+                                            resolver.openOutputStream(uri)?.use { outputStream ->
+                                                outputStream.write(glbData)
+                                            }
+                                            withContext(Dispatchers.Main) {
+                                                val gpsTag = if (currentLatitude != null && currentLongitude != null) " (GPS tagged)" else ""
+                                                Toast.makeText(context, "Saved previous scan to GLB!$gpsTag", Toast.LENGTH_SHORT).show()
+                                            }
                                         }
+                                    } catch (e: Exception) {
+                                        Log.e("Shutter", "Auto-export GLB failed", e)
                                     }
-                                } catch (e: Exception) {
-                                    Log.e("Shutter", "Auto-export GLB failed", e)
                                 }
                             }
                         }
@@ -1021,4 +1066,37 @@ class PointCloudAccumulator {
         }
         return Pair(posArray, colArray)
     }
+}
+
+private fun rotatePoint3x3(p: FloatArray, offset: Int, R: FloatArray) {
+    val x = p[offset]
+    val y = p[offset + 1]
+    val z = p[offset + 2]
+    p[offset]     = R[0] * x + R[1] * y + R[2] * z
+    p[offset + 1] = R[3] * x + R[4] * y + R[5] * z
+    p[offset + 2] = R[6] * x + R[7] * y + R[8] * z
+}
+
+private fun multiply3x3(A: FloatArray, B: FloatArray): FloatArray {
+    val C = FloatArray(9)
+    C[0] = A[0]*B[0] + A[1]*B[3] + A[2]*B[6]
+    C[1] = A[0]*B[1] + A[1]*B[4] + A[2]*B[7]
+    C[2] = A[0]*B[2] + A[1]*B[5] + A[2]*B[8]
+
+    C[3] = A[3]*B[0] + A[4]*B[3] + A[5]*B[6]
+    C[4] = A[3]*B[1] + A[4]*B[4] + A[5]*B[7]
+    C[5] = A[3]*B[2] + A[4]*B[5] + A[5]*B[8]
+
+    C[6] = A[6]*B[0] + A[7]*B[3] + A[8]*B[6]
+    C[7] = A[6]*B[1] + A[7]*B[4] + A[8]*B[7]
+    C[8] = A[6]*B[2] + A[7]*B[5] + A[8]*B[8]
+    return C
+}
+
+private fun transpose3x3(A: FloatArray): FloatArray {
+    val T = FloatArray(9)
+    T[0] = A[0]; T[1] = A[3]; T[2] = A[6]
+    T[3] = A[1]; T[4] = A[4]; T[5] = A[7]
+    T[6] = A[2]; T[7] = A[5]; T[8] = A[8]
+    return T
 }
