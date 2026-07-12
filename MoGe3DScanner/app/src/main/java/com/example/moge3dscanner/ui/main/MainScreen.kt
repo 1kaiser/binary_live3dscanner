@@ -180,6 +180,8 @@ fun MainScreen(
     val renderer = remember { GLPointRenderer() }
     var interpreter by remember { mutableStateOf<MogeInterpreter?>(null) }
     val cameraExecutor = remember { Executors.newSingleThreadExecutor() }
+    // Hold a reference to the GL view so we can call requestRender() from any button
+    val glViewRef = remember { mutableStateOf<InteractiveGLView?>(null) }
 
     var statusText by remember { mutableStateOf("Initializing system...") }
     var activeAccelerator by remember { mutableStateOf("Detecting...") }
@@ -340,6 +342,7 @@ fun MainScreen(
                         requestRender()
                     }
                     onResume()
+                    glViewRef.value = this  // store reference for reset button
                 }
             },
             update = { glView ->
@@ -700,12 +703,26 @@ fun MainScreen(
                     .clickable(enabled = !isProcessingFrame) {
                         val positions = lastPositions
                         val colors = lastColors
-                        
-                        // 1. Trigger new snapshot
+
+                        // 1. Capture gravity-aligned orientation at scan time
+                        //    rotationMatrix is 3x3 row-major from SensorManager.
+                        //    Convert to 4x4 column-major for OpenGL and store as base orientation.
+                        val R = synchronized(rotationMatrix) { rotationMatrix.clone() }
+                        // Build a 4x4 column-major matrix from 3x3 row-major R:
+                        //   OpenGL col-major[col*4+row] = R_row_major[row*3+col]
+                        val grav4x4 = FloatArray(16)
+                        grav4x4[0]  = R[0]; grav4x4[4]  = R[1]; grav4x4[8]  = R[2];  grav4x4[12] = 0f
+                        grav4x4[1]  = R[3]; grav4x4[5]  = R[4]; grav4x4[9]  = R[5];  grav4x4[13] = 0f
+                        grav4x4[2]  = R[6]; grav4x4[6]  = R[7]; grav4x4[10] = R[8];  grav4x4[14] = 0f
+                        grav4x4[3]  = 0f;   grav4x4[7]  = 0f;   grav4x4[11] = 0f;    grav4x4[15] = 1f
+                        System.arraycopy(grav4x4, 0, renderer.gravityAlignMatrix, 0, 16)
+                        renderer.resetAngles()  // reset user rotation to gravity-aligned default
+
+                        // 2. Trigger new snapshot
                         shouldTakeSnapshot.set(true)
                         isProcessingFrame = true
 
-                        // 2. Clear previous point cloud before starting new analysis
+                        // 3. Clear previous point cloud before starting new analysis
                         accumulator.clear()
                         renderer.updatePoints(FloatArray(0), FloatArray(0))
                         lastPositions = null
@@ -755,10 +772,32 @@ fun MainScreen(
                         modifier = Modifier.size(28.dp)
                     )
                 }
+            } // end shutter Box
+
+            // Orientation Reset Button (↺) — returns view to gravity-aligned default
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .size(56.dp)
+                    .shadow(2.dp, RoundedCornerShape(16.dp))
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Color.White)
+                    .border(1.5.dp, Color.Black, RoundedCornerShape(16.dp))
+                    .clickable {
+                        renderer.resetAngles()
+                        glViewRef.value?.requestRender()
+                    }
+            ) {
+                Text(
+                    text = "↺",
+                    fontSize = 20.sp,
+                    color = Color.Black,
+                    fontWeight = FontWeight.Bold
+                )
             }
-        }
-    }
-}
+        } // end Row
+    } // end outer Box
+} // end MainScreen
 
 private fun exportPly(positions: FloatArray, colors: FloatArray, latitude: Double? = null, longitude: Double? = null): String {
     val sb = java.lang.StringBuilder()

@@ -1,66 +1,83 @@
 # MoGe3DScanner - Native Live 3D Scanner
 
-A self-contained Android application that performs live 3D reconstruction from single-camera RGB images in real-time, utilizing the **MoGe** monocular geometry model running on-device.
+A self-contained Android application that performs live 3D reconstruction from single-camera RGB images in real-time, utilizing the **MoGe** monocular geometry model running entirely on-device.
 
-### 📸 Evolution & Progress of the UI
+---
 
-| Generation 1: Split Screen | Generation 2: PIP & Square Panel | Generation 3: Premium UI & Stopwatch |
+### 📸 UI Evolution & Progress
+
+| Generation 1: Split Screen | Generation 2: PiP & Square Panel | Generation 3: Premium Bordered Buttons |
 |:---:|:---:|:---:|
-| ![Gen 1 Split](screenshot.png) | ![Gen 2 PIP](screenshot_pip_square.png) | ![Gen 3 Premium](screenshot_done.png) |
+| ![Gen 1](screenshot.png) | ![Gen 2](screenshot_pip_square.png) | ![Gen 3](screenshot_done.png) |
 
-### 🔘 Shutter Button States (Generation 3)
+### 🔘 Shutter Button States
 
-| Paused State (Solid Black Border, Camera Icon) | Processing State (Red Dashed Border, Live Stopwatch) |
+| Idle (Solid Border, Camera Icon) | Active (Red Dashed Border, Live Stopwatch) |
 |:---:|:---:|
-| ![Paused State](screenshot_paused.png) | ![Processing State](screenshot_processing.png) |
+| ![Paused](screenshot_paused.png) | ![Processing](screenshot_processing.png) |
 
 ---
 
 ## 🌟 Key Features
 
 1. **On-Device Monocular Depth Estimation**:
-   Uses a quantized `moge_v2_fp16.tflite` model running locally via TensorFlow Lite, with support for GPU and CPU (XNNPACK) acceleration.
-2. **Gravity-Aligned Coordinate Mapping**:
-   Integrates the phone's orientation sensor vector (`Sensor.TYPE_ROTATION_VECTOR`) to calculate a thread-safe 3D rotation matrix. It automatically maps the camera-space point cloud coordinates to device space and rotates them to world space. This keeps the coordinate system aligned with physical gravity (keeping the scanned object upright regardless of how the phone is tilted).
-3. **Multi-Frame Scan Merging**:
-   Includes a thread-safe `PointCloudAccumulator` to accumulate and merge point clouds across multiple camera frames on the fly, with a FIFO-based point count cap (150,000 points) to maintain fluid rendering performance.
-4. **GPS Metadata Tagging**:
-   Retrieves location coordinates using Android's `LocationManager`. It embeds the GPS coordinates directly inside:
-   * **PLY Export**: Custom header comments (`comment gps_latitude` and `comment gps_longitude`).
-   * **GLB Export**: Standard `asset.extras` glTF JSON metadata fields.
-5. **Continuous & Manual Capture Modes**:
-   A Play/Pause toggle allows switching between continuous scanning and manual snapshot capturing. By default, the app starts in paused mode to prevent CPU-bound ViT model thermal throttling, letting the user tap the shutter to scan.
-6. **Active Stopwatch & Auto-Save**:
-   The shutter button features a thick red dashed border and a live ticking stopwatch timer during active depth calculation, reverting to a camera icon with a solid thin black border when idle. Tapping the shutter button automatically auto-saves the current point cloud to GLB asynchronously in the background.
+   Uses a quantized `moge_v2_fp16.tflite` model running locally via TensorFlow Lite, with support for GPU delegation and CPU (XNNPACK) fallback.
+
+2. **Gravity-Aligned Point Cloud Orientation**:
+   At the moment the shutter is tapped, the live `TYPE_ROTATION_VECTOR` sensor matrix is captured and converted to a 4×4 OpenGL column-major matrix. This matrix becomes the **base orientation** of the rendered point cloud — so the scene always appears physically upright (gravity pointing down) immediately after a scan, regardless of how the phone was held.
+
+3. **Turntable Orbital Controls**:
+   - **Single-finger drag left/right**: Spins the model around its world-vertical Y-axis.
+   - **Single-finger drag up/down**: Tilts the model toward/away from the viewer (no perpendicular roll).
+   - **Two-finger pinch**: Zoom in/out.
+   - **Two-finger pan**: Translate the model in screen space.
+   - **↺ Reset button**: Instantly snaps the view back to the gravity-aligned default orientation, clearing any user-applied rotation and pan.
+
+4. **Multi-Frame Scan Accumulator**:
+   A thread-safe `PointCloudAccumulator` merges point clouds from multiple frames on-the-fly with a FIFO cap of 150,000 points for fluid OpenGL ES 2.0 rendering.
+
+5. **GPS Metadata Tagging**:
+   Retrieves live location via `LocationManager` and embeds GPS coordinates in:
+   * **PLY**: `comment gps_latitude` / `comment gps_longitude` headers.
+   * **GLB**: `asset.extras` JSON fields in the glTF binary.
+
+6. **Default Paused Mode & Active Stopwatch**:
+   App starts paused to avoid thermal throttling from the heavy ViT model. Tapping the shutter:
+   - Captures the current gravity orientation as the new view default.
+   - Triggers a single-frame depth inference.
+   - Displays a **live ticking stopwatch** (red dashed border) while inference runs.
+   - Auto-saves the previous scan to GLB asynchronously in the background.
+   - Resets to a **camera icon** (solid black border) when done.
+
 7. **Dual Export Options**:
-   * **Export PLY**: Exports the colored point cloud as an ASCII `.ply` file in the Downloads folder.
-   * **Export GLB**: Exports the point cloud as a standard binary glTF `.glb` file, compatible with Blender and standard 3D viewers.
+   * **ply** button: Exports colored point cloud as ASCII `.ply` to Downloads.
+   * **glb** button: Exports as binary glTF `.glb` compatible with Blender and standard 3D viewers.
 
 ---
 
-## 🏗️ Folder Structure
+## 🏗️ Architecture
 
-* **`app/src/main/java/.../ui/main/MainScreen.kt`**: Contains the main Compose layout, CameraX analysis hook, orientation sensor listener, and the PointCloudAccumulator.
-* **`app/src/main/java/.../ui/main/MogeInterpreter.kt`**: Handles TFLite model loading, multi-output tensor binding (`runForMultipleInputsOutputs`), and grid subsampling.
-* **`app/src/main/java/.../ui/main/GLPointRenderer.kt`**: A high-performance OpenGL ES 2.0 point cloud renderer featuring interactive gesture scaling and rotation.
+| File | Role |
+|---|---|
+| `MainScreen.kt` | Compose UI, CameraX analyzer, sensor listener, orbital gesture handler, GPS, export |
+| `MogeInterpreter.kt` | TFLite model loading, `runForMultipleInputsOutputs`, NIO buffer management |
+| `GLPointRenderer.kt` | OpenGL ES 2.0 renderer; `gravityAlignMatrix`, `resetAngles()`, turntable rotation |
 
 ---
 
 ## ⚙️ Compilation & Deployment
 
-To compile the application and install it on your Android device via command-line:
-
 ```bash
-# 1. Compile the debug APK
+# 1. Build debug APK
 ./gradlew assembleDebug --no-configuration-cache
 
-# 2. Uninstall the previous package (if any)
+# 2. Install (grant permissions automatically)
 adb uninstall com.example.moge3dscanner
-
-# 3. Install the APK
 adb install app/build/outputs/apk/debug/app-debug.apk
+adb shell pm grant com.example.moge3dscanner android.permission.CAMERA
+adb shell pm grant com.example.moge3dscanner android.permission.ACCESS_FINE_LOCATION
 
-# 4. Launch the application
+# 3. Launch
 adb shell am start -n com.example.moge3dscanner/.MainActivity
 ```
 
@@ -69,14 +86,17 @@ adb shell am start -n com.example.moge3dscanner/.MainActivity
 ## 📚 Citations & Acknowledgments
 
 * **MoGe v1 & v2 Models**:
-  This project utilizes the state-of-the-art monocular depth estimation and 3D geometry models developed by Microsoft.
-  * *Code Repository*: [https://github.com/microsoft/MoGe](https://github.com/microsoft/MoGe)
+  State-of-the-art monocular geometry estimation by Microsoft Research.
+  * *Repository*: [https://github.com/microsoft/MoGe](https://github.com/microsoft/MoGe)
+
 * **3D Live Scanner Historical Legacy**:
-  This work builds upon the historical timeline of mobile 3D scanning pioneered by **Luboš Vonásek**:
-  > **2017-2021: 3D Live Scanner**
-  > *3D Live Scanner, initially launched as 3D Scanner for ARCore and originally known as OpenConstructor for Tango, is a trailblazing Android application that pioneered the mobile 3D scanning space. It was among the very first apps designed to capture detailed 3D models of interiors, exteriors, individual objects, and even faces, bringing advanced scanning technology into the hands of everyday users.*
+  This work builds upon the mobile 3D scanning tradition pioneered by **Luboš Vonásek**:
+  > **2017–2021: 3D Live Scanner** *(originally OpenConstructor for Tango, then 3D Scanner for ARCore)*
+  > *One of the first apps to bring real-time 3D interior/exterior scanning to Android.*
   > *Source*: [Luboš Vonásek Homepage](https://lvonasek.github.io/)
+
 * **Android CLI & Antigravity CLI**:
-  Development and rapid iteration of this native application were powered by [Android Platform-Tools](https://developer.android.com/tools/releases/platform-tools) and the [Antigravity CLI](https://antigravity.google/docs) agent platform. The automated build, deployment, screenshot auditing, and remote device command executions allowed fast development cycles directly from the terminal.
+  Development and rapid iteration were powered by [Android Platform-Tools](https://developer.android.com/tools/releases/platform-tools) and the [Antigravity CLI](https://antigravity.google/docs) agent platform. Automated build, deployment, screenshot auditing, and remote device command execution enabled fast development cycles directly from the terminal.
+
 * **Pre-compiled Binaries**:
-  The final optimized release version of the application can be downloaded directly as [moge_3d_scanner_v3.zip](moge_3d_scanner_v3.zip).
+  Download the latest debug APK: [moge_3d_scanner_v3.zip](moge_3d_scanner_v3.zip)
