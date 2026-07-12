@@ -5,6 +5,8 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.opengl.GLSurfaceView
 import android.os.Environment
+import android.os.Handler
+import android.os.Looper
 import android.provider.MediaStore
 import android.util.Log
 import android.view.MotionEvent
@@ -40,6 +42,10 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.draw.drawBehind
 import kotlin.math.roundToInt
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
@@ -51,7 +57,10 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.rememberCoroutineScope
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
@@ -147,7 +156,7 @@ class InteractiveGLView(context: Context, val renderer: GLPointRenderer) : GLSur
                         val dy = y - previousY
 
                         renderer.angleX += dx * 0.15f
-                        renderer.angleY += dy * 0.15f
+                        renderer.angleY -= dy * 0.15f
                         requestRender()
                     }
                     previousX = x
@@ -166,6 +175,7 @@ fun MainScreen(
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    val scope = rememberCoroutineScope()
 
     val renderer = remember { GLPointRenderer() }
     var interpreter by remember { mutableStateOf<MogeInterpreter?>(null) }
@@ -183,13 +193,28 @@ fun MainScreen(
     var isAccumulateEnabled by remember { mutableStateOf(false) }
 
     // Capture/Snapshot states
-    var isContinuousScanning by remember { mutableStateOf(true) }
+    var isContinuousScanning by remember { mutableStateOf(false) }
     var isProcessingFrame by remember { mutableStateOf(false) }
-    var shouldTakeSnapshot by remember { mutableStateOf(false) }
+    val shouldTakeSnapshot = remember { AtomicBoolean(false) }
 
     // Dragable/resizable camera Pip states
     var pipOffset by remember { mutableStateOf(Offset(0f, 0f)) }
     var pipSizeMultiplier by remember { mutableStateOf(1f) }
+
+    // Live inference stopwatch state
+    var inferenceTimeMs by remember { mutableStateOf(0L) }
+
+    LaunchedEffect(isProcessingFrame) {
+        if (isProcessingFrame) {
+            val startTime = System.currentTimeMillis()
+            while (true) {
+                inferenceTimeMs = System.currentTimeMillis() - startTime
+                kotlinx.coroutines.delay(50)
+            }
+        } else {
+            inferenceTimeMs = 0L
+        }
+    }
 
     // Sensor setup
     val sensorManager = remember { context.getSystemService(Context.SENSOR_SERVICE) as SensorManager }
@@ -355,7 +380,12 @@ fun MainScreen(
 
         // 3. Play/Pause Continuous Scanning Mode (top-right overlay)
         IconButton(
-            onClick = { isContinuousScanning = !isContinuousScanning },
+            onClick = {
+                isContinuousScanning = !isContinuousScanning
+                if (!isContinuousScanning) {
+                    isProcessingFrame = false
+                }
+            },
             modifier = Modifier
                 .align(Alignment.TopEnd)
                 .statusBarsPadding()
@@ -410,11 +440,14 @@ fun MainScreen(
                             .also { analyzer ->
                                 analyzer.setAnalyzer(cameraExecutor) { imageProxy ->
                                     try {
-                                        if (isContinuousScanning || shouldTakeSnapshot) {
-                                            shouldTakeSnapshot = false
-                                            isProcessingFrame = true
-                                            
-                                            interpreter?.let { model ->
+                                        if (isContinuousScanning || shouldTakeSnapshot.compareAndSet(true, false)) {
+                                            val model = interpreter
+                                            if (model != null) {
+                                                Log.d("Analyzer", "Running inference: setting isProcessingFrame = true")
+                                                Handler(Looper.getMainLooper()).post {
+                                                    isProcessingFrame = true
+                                                }
+                                                
                                                 val width = imageProxy.width
                                                 val height = imageProxy.height
                                                 val plane = imageProxy.planes[0]
@@ -457,22 +490,37 @@ fun MainScreen(
                                                         rotatedPositions[j * 3 + 2] = -yw
                                                     }
                                                     
-                                                    // Continuous scanning appends points, manual clear on snap is handled by button click
                                                     val accumulate = isContinuousScanning
                                                     accumulator.addFrame(rotatedPositions, colors, accumulate)
                                                     val (mergedPositions, mergedColors) = accumulator.getPositionsAndColors()
                                                     
-                                                    lastPositions = mergedPositions
-                                                    lastColors = mergedColors
-                                                    
-                                                    renderer.updatePoints(mergedPositions, mergedColors)
+                                                    Handler(Looper.getMainLooper()).post {
+                                                        lastPositions = mergedPositions
+                                                        lastColors = mergedColors
+                                                        renderer.updatePoints(mergedPositions, mergedColors)
+                                                    }
                                                 }
+                                                Log.d("Analyzer", "Finished inference: setting isProcessingFrame = false")
+                                                Handler(Looper.getMainLooper()).post {
+                                                    isProcessingFrame = false
+                                                }
+                                            } else {
+                                                Log.d("Analyzer", "Model null: setting isProcessingFrame = false")
+                                                Handler(Looper.getMainLooper()).post {
+                                                    isProcessingFrame = false
+                                                }
+                                            }
+                                        } else {
+                                            Handler(Looper.getMainLooper()).post {
                                                 isProcessingFrame = false
                                             }
                                         }
                                     } catch (e: Exception) {
                                         Log.e("Analyzer", "Frame analysis failed", e)
-                                        isProcessingFrame = false
+                                        Log.d("Analyzer", "Exception: setting isProcessingFrame = false")
+                                        Handler(Looper.getMainLooper()).post {
+                                            isProcessingFrame = false
+                                        }
                                     } finally {
                                         imageProxy.close()
                                     }
@@ -518,132 +566,192 @@ fun MainScreen(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .fillMaxHeight(0.2f)
+                .fillMaxHeight(0.18f)
                 .align(Alignment.BottomCenter)
-                .background(Color(0xFF956820)),
-            horizontalArrangement = Arrangement.spacedBy(1.dp),
+                .background(Color.Transparent)
+                .padding(horizontal = 16.dp, vertical = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             // Export PLY Button
-            Button(
-                onClick = {
-                    val positions = lastPositions
-                    val colors = lastColors
-                    if (positions != null && colors != null) {
-                        try {
-                            val plyData = exportPly(positions, colors, currentLatitude, currentLongitude)
-                            val contentValues = ContentValues().apply {
-                                put(MediaStore.MediaColumns.DISPLAY_NAME, "moge_scan_${System.currentTimeMillis()}.ply")
-                                put(MediaStore.MediaColumns.MIME_TYPE, "application/octet-stream")
-                                put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
-                            }
-                            val resolver = context.contentResolver
-                            val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
-                            if (uri != null) {
-                                resolver.openOutputStream(uri)?.use { outputStream ->
-                                    outputStream.write(plyData.toByteArray())
-                                }
-                                val gpsTag = if (currentLatitude != null && currentLongitude != null) " (GPS tagged)" else ""
-                                Toast.makeText(context, "PLY saved to Downloads!$gpsTag", Toast.LENGTH_SHORT).show()
-                            } else {
-                                Toast.makeText(context, "Failed to create PLY file.", Toast.LENGTH_SHORT).show()
-                            }
-                        } catch (e: Exception) {
-                            Toast.makeText(context, "Export error: ${e.message}", Toast.LENGTH_SHORT).show()
-                        }
-                    } else {
-                        Toast.makeText(context, "No scan data available yet.", Toast.LENGTH_SHORT).show()
-                    }
-                },
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF956820)),
-                shape = RectangleShape,
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxHeight()
-            ) {
-                Text(
-                    text = "PLY",
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 14.sp,
-                    color = Color.White
-                )
-            }
-
-            // Export GLB Button
-            Button(
-                onClick = {
-                    val positions = lastPositions
-                    val colors = lastColors
-                    if (positions != null && colors != null) {
-                        try {
-                            val glbData = exportGlb(positions, colors, currentLatitude, currentLongitude)
-                            val contentValues = ContentValues().apply {
-                                put(MediaStore.MediaColumns.DISPLAY_NAME, "moge_scan_${System.currentTimeMillis()}.glb")
-                                put(MediaStore.MediaColumns.MIME_TYPE, "model/gltf-binary")
-                                put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
-                            }
-                            val resolver = context.contentResolver
-                            val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
-                            if (uri != null) {
-                                resolver.openOutputStream(uri)?.use { outputStream ->
-                                    outputStream.write(glbData)
-                                }
-                                val gpsTag = if (currentLatitude != null && currentLongitude != null) " (GPS tagged)" else ""
-                                Toast.makeText(context, "GLB saved to Downloads!$gpsTag", Toast.LENGTH_SHORT).show()
-                            } else {
-                                Toast.makeText(context, "Failed to create GLB file.", Toast.LENGTH_SHORT).show()
-                            }
-                        } catch (e: Exception) {
-                            Toast.makeText(context, "Export error: ${e.message}", Toast.LENGTH_SHORT).show()
-                        }
-                    } else {
-                        Toast.makeText(context, "No scan data available yet.", Toast.LENGTH_SHORT).show()
-                    }
-                },
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF855A1A)),
-                shape = RectangleShape,
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxHeight()
-            ) {
-                Text(
-                    text = "GLB",
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 14.sp,
-                    color = Color.White
-                )
-            }
-
-            // Camera Shutter Button (Square, Auto-clears prior data on click)
             Box(
                 contentAlignment = Alignment.Center,
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxHeight()
-                    .background(Color(0xFF704812))
+                    .shadow(2.dp, RoundedCornerShape(16.dp))
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Color.White)
+                    .border(1.5.dp, Color.Black, RoundedCornerShape(16.dp))
+                    .clickable {
+                        val positions = lastPositions
+                        val colors = lastColors
+                        if (positions != null && colors != null) {
+                            try {
+                                val plyData = exportPly(positions, colors, currentLatitude, currentLongitude)
+                                val contentValues = ContentValues().apply {
+                                    put(MediaStore.MediaColumns.DISPLAY_NAME, "moge_scan_${System.currentTimeMillis()}.ply")
+                                    put(MediaStore.MediaColumns.MIME_TYPE, "application/octet-stream")
+                                    put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+                                }
+                                val resolver = context.contentResolver
+                                val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
+                                if (uri != null) {
+                                    resolver.openOutputStream(uri)?.use { outputStream ->
+                                        outputStream.write(plyData.toByteArray())
+                                    }
+                                    val gpsTag = if (currentLatitude != null && currentLongitude != null) " (GPS tagged)" else ""
+                                    Toast.makeText(context, "PLY saved to Downloads!$gpsTag", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    Toast.makeText(context, "Failed to create PLY file.", Toast.LENGTH_SHORT).show()
+                                }
+                            } catch (e: Exception) {
+                                Toast.makeText(context, "Export error: ${e.message}", Toast.LENGTH_SHORT).show()
+                            }
+                        } else {
+                            Toast.makeText(context, "No scan data available yet.", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+            ) {
+                Text(
+                    text = "ply",
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 16.sp,
+                    color = Color.Black,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+
+            // Export GLB Button
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .shadow(2.dp, RoundedCornerShape(16.dp))
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Color.White)
+                    .border(1.5.dp, Color.Black, RoundedCornerShape(16.dp))
+                    .clickable {
+                        val positions = lastPositions
+                        val colors = lastColors
+                        if (positions != null && colors != null) {
+                            try {
+                                val glbData = exportGlb(positions, colors, currentLatitude, currentLongitude)
+                                val contentValues = ContentValues().apply {
+                                    put(MediaStore.MediaColumns.DISPLAY_NAME, "moge_scan_${System.currentTimeMillis()}.glb")
+                                    put(MediaStore.MediaColumns.MIME_TYPE, "model/gltf-binary")
+                                    put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+                                }
+                                val resolver = context.contentResolver
+                                val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
+                                if (uri != null) {
+                                    resolver.openOutputStream(uri)?.use { outputStream ->
+                                        outputStream.write(glbData)
+                                    }
+                                    val gpsTag = if (currentLatitude != null && currentLongitude != null) " (GPS tagged)" else ""
+                                    Toast.makeText(context, "GLB saved to Downloads!$gpsTag", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    Toast.makeText(context, "Failed to create GLB file.", Toast.LENGTH_SHORT).show()
+                                }
+                            } catch (e: Exception) {
+                                Toast.makeText(context, "Export error: ${e.message}", Toast.LENGTH_SHORT).show()
+                            }
+                        } else {
+                            Toast.makeText(context, "No scan data available yet.", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+            ) {
+                Text(
+                    text = "glb",
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 16.sp,
+                    color = Color.Black,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+
+            // Camera Shutter Button (Rounded, Auto-clears prior data on click, Red dashed border when processing)
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .shadow(2.dp, RoundedCornerShape(16.dp))
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Color.White)
+                    .then(
+                        if (isProcessingFrame) {
+                            Modifier.drawBehind {
+                                val stroke = Stroke(
+                                    width = 3.dp.toPx(),
+                                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(15f, 10f), 0f)
+                                )
+                                drawRoundRect(
+                                    color = Color.Red,
+                                    style = stroke,
+                                    cornerRadius = CornerRadius(16.dp.toPx(), 16.dp.toPx())
+                                )
+                            }
+                        } else {
+                            Modifier.border(1.5.dp, Color.Black, RoundedCornerShape(16.dp))
+                        }
+                    )
                     .clickable(enabled = !isProcessingFrame) {
-                        // 1. Clear previous point cloud before starting new analysis
+                        val positions = lastPositions
+                        val colors = lastColors
+                        
+                        // 1. Trigger new snapshot
+                        shouldTakeSnapshot.set(true)
+                        isProcessingFrame = true
+
+                        // 2. Clear previous point cloud before starting new analysis
                         accumulator.clear()
                         renderer.updatePoints(FloatArray(0), FloatArray(0))
                         lastPositions = null
                         lastColors = null
                         
-                        // 2. Trigger new snapshot
-                        shouldTakeSnapshot = true
-                        isProcessingFrame = true
+                        // 3. Run GLB export in the background on IO coroutine pool
+                        if (positions != null && colors != null) {
+                            scope.launch(Dispatchers.IO) {
+                                try {
+                                    val glbData = exportGlb(positions, colors, currentLatitude, currentLongitude)
+                                    val contentValues = ContentValues().apply {
+                                        put(MediaStore.MediaColumns.DISPLAY_NAME, "moge_scan_${System.currentTimeMillis()}.glb")
+                                        put(MediaStore.MediaColumns.MIME_TYPE, "model/gltf-binary")
+                                        put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+                                    }
+                                    val resolver = context.contentResolver
+                                    val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
+                                    if (uri != null) {
+                                        resolver.openOutputStream(uri)?.use { outputStream ->
+                                            outputStream.write(glbData)
+                                        }
+                                        withContext(Dispatchers.Main) {
+                                            val gpsTag = if (currentLatitude != null && currentLongitude != null) " (GPS tagged)" else ""
+                                            Toast.makeText(context, "Saved previous scan to GLB!$gpsTag", Toast.LENGTH_SHORT).show()
+                                        }
+                                    }
+                                } catch (e: Exception) {
+                                    Log.e("Shutter", "Auto-export GLB failed", e)
+                                }
+                            }
+                        }
                     }
             ) {
                 if (isProcessingFrame) {
-                    CircularProgressIndicator(
-                        color = Color.White,
-                        strokeWidth = 3.dp,
-                        modifier = Modifier.size(36.dp)
+                    Text(
+                        text = String.format("%.1fs", inferenceTimeMs / 1000f),
+                        fontSize = 14.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = Color.Red,
+                        fontWeight = FontWeight.Bold
                     )
                 } else {
                     Icon(
                         imageVector = Icons.Default.CameraAlt,
                         contentDescription = "Capture Snapshot",
-                        tint = Color.White,
+                        tint = Color.Black,
                         modifier = Modifier.size(28.dp)
                     )
                 }

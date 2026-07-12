@@ -97,6 +97,8 @@ class MogeInterpreter(private val context: Context) {
         outputs[0] = dummyOutput
         outputs[1] = outputBuffer
 
+        inputBuffer.rewind()
+        outputBuffer.rewind()
         outputFloatBuffer.rewind()
         interp.runForMultipleInputsOutputs(inputs, outputs)
 
