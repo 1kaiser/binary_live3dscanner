@@ -99,4 +99,8 @@ adb shell am start -n com.example.moge3dscanner/.MainActivity
   Development and rapid iteration were powered by [Android Platform-Tools](https://developer.android.com/tools/releases/platform-tools) and the [Antigravity CLI](https://antigravity.google/docs) agent platform. Automated build, deployment, screenshot auditing, and remote device command execution enabled fast development cycles directly from the terminal.
 
 * **Pre-compiled Binaries**:
-  Download the latest debug APK: [moge_3d_scanner_v3.zip](moge_3d_scanner_v3.zip)
+  Download the latest debug APK: [moge_3d_scanner_v4.zip](moge_3d_scanner_v4.zip)
+
+### 🔄 Gravity Reset Button (↺)
+
+![Reset Button visible in bottom row](screenshot_reset_button.png)
