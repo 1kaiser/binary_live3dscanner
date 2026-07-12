@@ -4,9 +4,15 @@ A self-contained Android application that performs live 3D reconstruction from s
 
 ### 📸 Evolution & Progress of the UI
 
-| Generation 1: Split Screen Layout | Generation 2: Full-screen Background with PiP & Square Bottom Panel |
+| Generation 1: Split Screen | Generation 2: PIP & Square Panel | Generation 3: Premium UI & Stopwatch |
+|:---:|:---:|:---:|
+| ![Gen 1 Split](screenshot.png) | ![Gen 2 PIP](screenshot_pip_square.png) | ![Gen 3 Premium](screenshot_done.png) |
+
+### 🔘 Shutter Button States (Generation 3)
+
+| Paused State (Solid Black Border, Camera Icon) | Processing State (Red Dashed Border, Live Stopwatch) |
 |:---:|:---:|
-| ![Split Screen Layout](screenshot.png) | ![PiP with Square Buttons](screenshot_pip_square.png) |
+| ![Paused State](screenshot_paused.png) | ![Processing State](screenshot_processing.png) |
 
 ---
 
@@ -23,9 +29,9 @@ A self-contained Android application that performs live 3D reconstruction from s
    * **PLY Export**: Custom header comments (`comment gps_latitude` and `comment gps_longitude`).
    * **GLB Export**: Standard `asset.extras` glTF JSON metadata fields.
 5. **Continuous & Manual Capture Modes**:
-   A Play/Pause toggle allows switching between continuous scanning and manual snapshot capturing. In manual snapshot mode, a camera shutter FAB triggers depth estimation for a single frame, significantly reducing battery and thermal load.
-6. **Active Processing Spinner Overlay**:
-   The manual snapshot button features a circular progress edge loader that animates dynamically during the exact duration of the TFLite depth inference execution, providing clear feedback to the user when a frame is being calculated.
+   A Play/Pause toggle allows switching between continuous scanning and manual snapshot capturing. By default, the app starts in paused mode to prevent CPU-bound ViT model thermal throttling, letting the user tap the shutter to scan.
+6. **Active Stopwatch & Auto-Save**:
+   The shutter button features a thick red dashed border and a live ticking stopwatch timer during active depth calculation, reverting to a camera icon with a solid thin black border when idle. Tapping the shutter button automatically auto-saves the current point cloud to GLB asynchronously in the background.
 7. **Dual Export Options**:
    * **Export PLY**: Exports the colored point cloud as an ASCII `.ply` file in the Downloads folder.
    * **Export GLB**: Exports the point cloud as a standard binary glTF `.glb` file, compatible with Blender and standard 3D viewers.
@@ -73,4 +79,4 @@ adb shell am start -n com.example.moge3dscanner/.MainActivity
 * **Android CLI & Antigravity CLI**:
   Development and rapid iteration of this native application were powered by [Android Platform-Tools](https://developer.android.com/tools/releases/platform-tools) and the [Antigravity CLI](https://antigravity.google/docs) agent platform. The automated build, deployment, screenshot auditing, and remote device command executions allowed fast development cycles directly from the terminal.
 * **Pre-compiled Binaries**:
-  The final optimized release version of the application can be downloaded directly as [moge_3d_scanner_v2.zip](moge_3d_scanner_v2.zip).
+  The final optimized release version of the application can be downloaded directly as [moge_3d_scanner_v3.zip](moge_3d_scanner_v3.zip).
