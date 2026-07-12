@@ -57,6 +57,8 @@ class GLPointRenderer : GLSurfaceView.Renderer {
     var angleX: Float = 0f
     var angleY: Float = 0f
     var zoom: Float = 3.0f
+    var panX: Float = 0f
+    var panY: Float = 0f
 
     @Synchronized
     fun updatePoints(positions: FloatArray, colors: FloatArray) {
@@ -123,6 +125,8 @@ class GLPointRenderer : GLSurfaceView.Renderer {
 
         // Camera setup
         Matrix.setLookAtM(vMatrix, 0, 0f, 0f, zoom, 0f, 0f, 0f, 0f, 1f, 0f)
+        // Apply camera pan (translate view matrix)
+        Matrix.translateM(vMatrix, 0, panX, panY, 0f)
 
         // Rotation & translation matrices
         val scratch = FloatArray(16)

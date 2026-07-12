@@ -16,6 +16,7 @@ import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
@@ -28,7 +29,11 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.foundation.clickable
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontFamily
@@ -72,25 +77,77 @@ class InteractiveGLView(context: Context, val renderer: GLPointRenderer) : GLSur
         renderMode = RENDERMODE_WHEN_DIRTY
     }
 
+    private var isPanning = false
+    private var previousMidX = 0f
+    private var previousMidY = 0f
+
     override fun onTouchEvent(event: MotionEvent): Boolean {
         scaleDetector.onTouchEvent(event)
-        if (scaleDetector.isInProgress) return true
+        if (scaleDetector.isInProgress) {
+            isPanning = false
+            return true
+        }
 
-        val x: Float = event.x
-        val y: Float = event.y
+        val pointerCount = event.pointerCount
 
-        when (event.action) {
-            MotionEvent.ACTION_MOVE -> {
-                val dx: Float = x - previousX
-                val dy: Float = y - previousY
+        if (pointerCount == 2) {
+            val midX = (event.getX(0) + event.getX(1)) / 2f
+            val midY = (event.getY(0) + event.getY(1)) / 2f
 
-                renderer.angleX += dx * 0.15f
-                renderer.angleY += dy * 0.15f
-                requestRender()
+            when (event.actionMasked) {
+                MotionEvent.ACTION_POINTER_DOWN -> {
+                    previousMidX = midX
+                    previousMidY = midY
+                    isPanning = true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    if (isPanning) {
+                        val dx = midX - previousMidX
+                        val dy = midY - previousMidY
+
+                        // Scale pan sensitivity by current zoom
+                        val sensitivity = 0.0015f * renderer.zoom
+                        renderer.panX += dx * sensitivity
+                        renderer.panY -= dy * sensitivity // Flip Y axis
+                        requestRender()
+                    }
+                    previousMidX = midX
+                    previousMidY = midY
+                }
+                MotionEvent.ACTION_POINTER_UP -> {
+                    isPanning = false
+                    val actionIndex = event.actionIndex
+                    val remainingIndex = if (actionIndex == 0) 1 else 0
+                    if (remainingIndex < event.pointerCount) {
+                        previousX = event.getX(remainingIndex)
+                        previousY = event.getY(remainingIndex)
+                    }
+                }
+            }
+        } else if (pointerCount == 1) {
+            val x = event.x
+            val y = event.y
+
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    previousX = x
+                    previousY = y
+                    isPanning = false
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    if (!isPanning) {
+                        val dx = x - previousX
+                        val dy = y - previousY
+
+                        renderer.angleX += dx * 0.15f
+                        renderer.angleY += dy * 0.15f
+                        requestRender()
+                    }
+                    previousX = x
+                    previousY = y
+                }
             }
         }
-        previousX = x
-        previousY = y
         return true
     }
 }
@@ -202,7 +259,7 @@ fun MainScreen(
             }
             interpreter = loadedInterpreter
             activeAccelerator = loadedInterpreter.activeAccelerator
-            statusText = "Ready.\nAccelerator: ${loadedInterpreter.activeAccelerator}\nPoint cloud active."
+            statusText = "Ready"
         } catch (e: Exception) {
             Log.e("MainScreen", "Failed to load MogeInterpreter", e)
             statusText = "Failed to load model: ${e.message}"
@@ -234,273 +291,62 @@ fun MainScreen(
         }
     }
 
-    Column(
+    Box(
         modifier = modifier
             .fillMaxSize()
             .background(Color(0xFFF7F6F2))
-            .systemBarsPadding()
-            .padding(16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // Viewports Layout (Camera top half, Point Cloud bottom half)
-        Column(
-            modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            // Camera viewport
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-                    .aspectRatio(1f)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(Color.Black)
-            ) {
-                AndroidView(
-                    factory = { ctx ->
-                        val previewView = PreviewView(ctx).apply {
-                            scaleType = PreviewView.ScaleType.FILL_CENTER
-                        }
-                        
-                        val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
-                        cameraProviderFuture.addListener({
-                            val cameraProvider = cameraProviderFuture.get()
-                            
-                            val preview = Preview.Builder().build().also {
-                                it.setSurfaceProvider(previewView.surfaceProvider)
-                            }
-                            
-                            val imageAnalyzer = ImageAnalysis.Builder()
-                                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                                .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
-                                .build()
-                                .also { analyzer ->
-                                    analyzer.setAnalyzer(cameraExecutor) { imageProxy ->
-                                        try {
-                                            val runAnalysis = isContinuousScanning || shouldTakeSnapshot
-                                            if (runAnalysis) {
-                                                shouldTakeSnapshot = false
-                                                isProcessingFrame = true
-
-                                                val width = imageProxy.width
-                                                val height = imageProxy.height
-                                                val plane = imageProxy.planes[0]
-                                                val buffer = plane.buffer
-                                                
-                                                // Copy pixels to bitmap
-                                                val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-                                                bitmap.copyPixelsFromBuffer(buffer)
-                                                
-                                                // Handle rotation
-                                                val rotation = imageProxy.imageInfo.rotationDegrees
-                                                val rotatedBitmap = if (rotation != 0) {
-                                                    val matrix = android.graphics.Matrix().apply { postRotate(rotation.toFloat()) }
-                                                    Bitmap.createBitmap(bitmap, 0, 0, width, height, matrix, true)
-                                                } else {
-                                                    bitmap
-                                                }
-                                                
-                                                val result = interpreter?.runInference(rotatedBitmap, stride = 4)
-                                                if (result != null) {
-                                                    val positions = result.first
-                                                    val colors = result.second
-                                                    
-                                                    // 1. Rotate points based on current device orientation
-                                                    val rotatedPositions = FloatArray(positions.size)
-                                                    val R = FloatArray(9)
-                                                    synchronized(rotationMatrix) {
-                                                        System.arraycopy(rotationMatrix, 0, R, 0, 9)
-                                                    }
-                                                    
-                                                    for (j in 0 until positions.size / 3) {
-                                                        val xc = positions[j * 3]
-                                                        val yc = positions[j * 3 + 1]
-                                                        val zc = positions[j * 3 + 2]
-                                                        
-                                                        // Map camera space to device coordinates
-                                                        val xd = xc
-                                                        val yd = -yc
-                                                        val zd = -zc
-                                                        
-                                                        // Apply device rotation matrix (P_world = R * P_device)
-                                                        val xw = R[0] * xd + R[1] * yd + R[2] * zd
-                                                        val yw = R[3] * xd + R[4] * yd + R[5] * zd
-                                                        val zw = R[6] * xd + R[7] * yd + R[8] * zd
-                                                        
-                                                        // Map world coordinates to OpenGL conventions (Z is height -> Y is height, etc.)
-                                                        rotatedPositions[j * 3] = xw
-                                                        rotatedPositions[j * 3 + 1] = zw
-                                                        rotatedPositions[j * 3 + 2] = -yw
-                                                    }
-                                                    
-                                                    // 2. Accumulate/merge point cloud
-                                                    val accumulate = isAccumulateEnabled
-                                                    accumulator.addFrame(rotatedPositions, colors, accumulate)
-                                                    val (mergedPositions, mergedColors) = accumulator.getPositionsAndColors()
-                                                    
-                                                    var minX = Float.MAX_VALUE; var maxX = -Float.MAX_VALUE
-                                                    var minY = Float.MAX_VALUE; var maxY = -Float.MAX_VALUE
-                                                    var minZ = Float.MAX_VALUE; var maxZ = -Float.MAX_VALUE
-                                                    for (j in 0 until mergedPositions.size / 3) {
-                                                        val px = mergedPositions[j * 3]
-                                                        val py = mergedPositions[j * 3 + 1]
-                                                        val pz = mergedPositions[j * 3 + 2]
-                                                        if (px < minX) minX = px; if (px > maxX) maxX = px
-                                                        if (py < minY) minY = py; if (py > maxY) maxY = py
-                                                        if (pz < minZ) minZ = pz; if (pz > maxZ) maxZ = pz
-                                                    }
-                                                    Log.i("MainScreen", "Point cloud generated! Points: ${mergedPositions.size / 3}. Range X: [$minX, $maxX], Y: [$minY, $maxY], Z: [$minZ, $maxZ]")
-                                                    
-                                                    lastPositions = mergedPositions
-                                                    lastColors = mergedColors
-                                                    
-                                                    renderer.updatePoints(mergedPositions, mergedColors)
-                                                }
-                                                isProcessingFrame = false
-                                            }
-                                        } catch (e: Exception) {
-                                            Log.e("Analyzer", "Frame analysis failed", e)
-                                            isProcessingFrame = false
-                                        } finally {
-                                            imageProxy.close()
-                                        }
-                                    }
-                                }
-
-                            val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
-                            try {
-                                cameraProvider.unbindAll()
-                                cameraProvider.bindToLifecycle(
-                                    lifecycleOwner,
-                                    cameraSelector,
-                                    preview,
-                                    imageAnalyzer
-                                )
-                                statusText = "Scanning in real-time.\nAccelerator: $activeAccelerator"
-                            } catch (exc: Exception) {
-                                Log.e("CameraX", "Use case binding failed", exc)
-                                statusText = "Camera error: ${exc.message}"
-                            }
-                        }, ContextCompat.getMainExecutor(ctx))
-                        
-                        previewView
-                    },
-                    modifier = Modifier.fillMaxSize()
-                )
-                
-                // Label
-                Text(
-                    text = "CAMERA FEED",
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 10.sp,
-                    color = Color(0xFF737378),
-                    modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .padding(12.dp)
-                        .background(Color(0xFFF7F6F2).copy(alpha = 0.95f), RoundedCornerShape(4.dp))
-                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                )
-
-                // Continuous Scanning Play/Pause toggle
-                IconButton(
-                    onClick = { isContinuousScanning = !isContinuousScanning },
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(12.dp)
-                        .background(Color(0xFFF7F6F2).copy(alpha = 0.95f), CircleShape)
-                ) {
-                    Icon(
-                        imageVector = if (isContinuousScanning) Icons.Default.Pause else Icons.Default.PlayArrow,
-                        contentDescription = "Toggle Scan Mode",
-                        tint = Color(0xFF956820)
-                    )
-                }
-
-                // Snap Button
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(bottom = 16.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    if (isProcessingFrame) {
-                        CircularProgressIndicator(
-                            color = Color(0xFF956820),
-                            strokeWidth = 4.dp,
-                            modifier = Modifier.size(68.dp)
-                        )
+        // 1. Full-screen 3D Point Cloud Viewport (in the background)
+        AndroidView(
+            factory = { ctx ->
+                InteractiveGLView(ctx, renderer).apply {
+                    renderer.onNewPointsListener = {
+                        requestRender()
                     }
-                    FloatingActionButton(
-                        onClick = {
-                            if (!isProcessingFrame) {
-                                shouldTakeSnapshot = true
-                                isProcessingFrame = true
-                            }
-                        },
-                        containerColor = if (isContinuousScanning) Color(0xFF956820).copy(alpha = 0.6f) else Color(0xFF956820),
-                        contentColor = Color.White,
-                        shape = CircleShape,
-                        modifier = Modifier.size(56.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.CameraAlt,
-                            contentDescription = "Capture Snapshot"
-                        )
-                    }
+                    onResume()
                 }
-            }
+            },
+            update = { glView ->
+                glView.requestRender()
+            },
+            modifier = Modifier.fillMaxSize()
+        )
 
-            // 3D Point Cloud Viewport
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-                    .aspectRatio(1f)
-            ) {
-                AndroidView(
-                    factory = { ctx ->
-                        InteractiveGLView(ctx, renderer).apply {
-                            renderer.onNewPointsListener = {
-                                requestRender()
-                            }
-                            onResume()
-                        }
-                    },
-                    update = { glView ->
-                        glView.requestRender()
-                    },
-                    modifier = Modifier.fillMaxSize()
-                )
+        // 2. Status / Info Overlay (semi-transparent, top-left overlay inside 3D view)
+        Text(
+            text = "3D POINT CLOUD • $statusText ($activeAccelerator)",
+            fontFamily = FontFamily.Monospace,
+            fontSize = 9.sp,
+            color = Color(0xFF737378),
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .statusBarsPadding()
+                .padding(16.dp)
+                .background(Color(0xFFF7F6F2).copy(alpha = 0.85f), RoundedCornerShape(4.dp))
+                .padding(horizontal = 8.dp, vertical = 4.dp)
+        )
 
-                // Label
-                Text(
-                    text = "3D POINT CLOUD",
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 10.sp,
-                    color = Color(0xFF737378),
-                    modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .padding(12.dp)
-                        .background(Color(0xFFF7F6F2).copy(alpha = 0.95f), RoundedCornerShape(4.dp))
-                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                )
-            }
-        }
-
-        // 1. Merging Controls Row
+        // 3. Top Row Controls (Merge switch, GPS info, Continuous scanning toggle)
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .align(Alignment.TopCenter)
+                .statusBarsPadding()
+                .padding(top = 50.dp, start = 16.dp, end = 16.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
+            // Merge Controls Card
             Row(
+                modifier = Modifier
+                    .background(Color(0xFFF7F6F2).copy(alpha = 0.85f), RoundedCornerShape(8.dp))
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 Text(
-                    text = "Merge Scans",
-                    fontSize = 13.sp,
+                    text = "Merge",
+                    fontSize = 11.sp,
                     fontFamily = FontFamily.Monospace,
                     color = Color(0xFF1C1B1F)
                 )
@@ -510,34 +356,206 @@ fun MainScreen(
                     colors = SwitchDefaults.colors(
                         checkedThumbColor = Color(0xFF956820),
                         checkedTrackColor = Color(0xFFE5D5C0)
-                    )
+                    ),
+                    modifier = Modifier.scale(0.8f)
                 )
+                Box(
+                    modifier = Modifier
+                        .background(Color.Transparent)
+                        .clickable {
+                            accumulator.clear()
+                            renderer.updatePoints(FloatArray(0), FloatArray(0))
+                            lastPositions = null
+                            lastColors = null
+                            Toast.makeText(context, "Scan cleared", Toast.LENGTH_SHORT).show()
+                        }
+                        .padding(horizontal = 4.dp, vertical = 2.dp)
+                ) {
+                    Text(
+                        text = "CLEAR",
+                        fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = Color(0xFF956820),
+                        fontWeight = FontWeight.Bold
+                    )
+                }
             }
-            
-            OutlinedButton(
-                onClick = {
-                    accumulator.clear()
-                    renderer.updatePoints(FloatArray(0), FloatArray(0))
-                    lastPositions = null
-                    lastColors = null
-                    Toast.makeText(context, "Scan cleared", Toast.LENGTH_SHORT).show()
-                },
-                colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF956820)),
-                border = BorderStroke(1.dp, Color(0xFF956820)),
-                modifier = Modifier.height(36.dp)
+
+            // GPS Coordinates Chip
+            val gpsText = if (currentLatitude != null && currentLongitude != null) {
+                String.format("GPS: %.4f, %.4f", currentLatitude, currentLongitude)
+            } else {
+                "GPS: Searching..."
+            }
+            Text(
+                text = gpsText,
+                fontFamily = FontFamily.Monospace,
+                fontSize = 10.sp,
+                color = Color(0xFF1C1B1F),
+                modifier = Modifier
+                    .background(Color(0xFFF7F6F2).copy(alpha = 0.85f), RoundedCornerShape(8.dp))
+                    .padding(horizontal = 8.dp, vertical = 6.dp)
+            )
+
+            // Play/Pause Continuous Scanning Mode
+            IconButton(
+                onClick = { isContinuousScanning = !isContinuousScanning },
+                modifier = Modifier
+                    .background(Color(0xFFF7F6F2).copy(alpha = 0.85f), CircleShape)
+                    .size(36.dp)
             ) {
-                Text(
-                    text = "Clear Merged",
-                    fontSize = 11.sp,
-                    fontFamily = FontFamily.Monospace
+                Icon(
+                    imageVector = if (isContinuousScanning) Icons.Default.Pause else Icons.Default.PlayArrow,
+                    contentDescription = "Toggle Scan Mode",
+                    tint = Color(0xFF956820),
+                    modifier = Modifier.size(20.dp)
                 )
             }
         }
 
-        // 2. Export Buttons Row
+        // 4. Floating Camera Preview (Picture-in-Picture window)
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(bottom = 90.dp, end = 16.dp)
+                .size(width = 110.dp, height = 145.dp)
+                .shadow(6.dp, RoundedCornerShape(12.dp))
+                .clip(RoundedCornerShape(12.dp))
+                .background(Color.Black)
+                .border(2.dp, Color.White, RoundedCornerShape(12.dp))
+        ) {
+            AndroidView(
+                factory = { ctx ->
+                    val previewView = PreviewView(ctx).apply {
+                        scaleType = PreviewView.ScaleType.FILL_CENTER
+                    }
+                    
+                    val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
+                    cameraProviderFuture.addListener({
+                        val cameraProvider = cameraProviderFuture.get()
+                        
+                        val preview = Preview.Builder().build().also {
+                            it.setSurfaceProvider(previewView.surfaceProvider)
+                        }
+                        
+                        val imageAnalyzer = ImageAnalysis.Builder()
+                            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                            .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
+                            .build()
+                            .also { analyzer ->
+                                analyzer.setAnalyzer(cameraExecutor) { imageProxy ->
+                                    try {
+                                        if (isContinuousScanning || shouldTakeSnapshot) {
+                                            shouldTakeSnapshot = false
+                                            isProcessingFrame = true
+                                            
+                                            interpreter?.let { model ->
+                                                val width = imageProxy.width
+                                                val height = imageProxy.height
+                                                val plane = imageProxy.planes[0]
+                                                val buffer = plane.buffer
+                                                
+                                                val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+                                                bitmap.copyPixelsFromBuffer(buffer)
+                                                
+                                                val rotation = imageProxy.imageInfo.rotationDegrees
+                                                val rotatedBitmap = if (rotation != 0) {
+                                                    val matrix = android.graphics.Matrix().apply { postRotate(rotation.toFloat()) }
+                                                    Bitmap.createBitmap(bitmap, 0, 0, width, height, matrix, true)
+                                                } else {
+                                                    bitmap
+                                                }
+                                                
+                                                val result = model.runInference(rotatedBitmap, stride = 4)
+                                                if (result != null) {
+                                                    val positions = result.first
+                                                    val colors = result.second
+                                                    val numPoints = positions.size / 3
+                                                    val rotatedPositions = FloatArray(positions.size)
+                                                    val R = rotationMatrix.clone()
+                                                    
+                                                    for (j in 0 until numPoints) {
+                                                        val xc = positions[j * 3]
+                                                        val yc = positions[j * 3 + 1]
+                                                        val zc = positions[j * 3 + 2]
+                                                        
+                                                        val xd = xc
+                                                        val yd = -yc
+                                                        val zd = -zc
+                                                        
+                                                        val xw = R[0] * xd + R[1] * yd + R[2] * zd
+                                                        val yw = R[3] * xd + R[4] * yd + R[5] * zd
+                                                        val zw = R[6] * xd + R[7] * yd + R[8] * zd
+                                                        
+                                                        rotatedPositions[j * 3] = xw
+                                                        rotatedPositions[j * 3 + 1] = zw
+                                                        rotatedPositions[j * 3 + 2] = -yw
+                                                    }
+                                                    
+                                                    val accumulate = isAccumulateEnabled
+                                                    accumulator.addFrame(rotatedPositions, colors, accumulate)
+                                                    val (mergedPositions, mergedColors) = accumulator.getPositionsAndColors()
+                                                    
+                                                    lastPositions = mergedPositions
+                                                    lastColors = mergedColors
+                                                    
+                                                    renderer.updatePoints(mergedPositions, mergedColors)
+                                                }
+                                                isProcessingFrame = false
+                                            }
+                                        }
+                                    } catch (e: Exception) {
+                                        Log.e("Analyzer", "Frame analysis failed", e)
+                                        isProcessingFrame = false
+                                    } finally {
+                                        imageProxy.close()
+                                    }
+                                }
+                            }
+
+                        val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
+                        try {
+                            cameraProvider.unbindAll()
+                            cameraProvider.bindToLifecycle(
+                                lifecycleOwner,
+                                cameraSelector,
+                                preview,
+                                imageAnalyzer
+                            )
+                            statusText = "Scanning"
+                        } catch (exc: Exception) {
+                            Log.e("CameraX", "Use case binding failed", exc)
+                            statusText = "Camera error"
+                        }
+                    }, ContextCompat.getMainExecutor(ctx))
+                    
+                    previewView
+                },
+                modifier = Modifier.fillMaxSize()
+            )
+            
+            Text(
+                text = "LIVE",
+                fontSize = 8.sp,
+                fontFamily = FontFamily.Monospace,
+                color = Color.Red,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(6.dp)
+                    .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(2.dp))
+                    .padding(horizontal = 4.dp, vertical = 2.dp)
+            )
+        }
+
+        // 5. Bottom Control Row (PLY, GLB and Camera Shutter Button side by side)
         Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(horizontal = 16.dp, vertical = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             // Export PLY Button
@@ -572,12 +590,13 @@ fun MainScreen(
                     }
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF956820)),
+                shape = RoundedCornerShape(12.dp),
                 modifier = Modifier
                     .weight(1f)
                     .height(48.dp)
             ) {
                 Text(
-                    text = "Export PLY",
+                    text = "PLY",
                     fontFamily = FontFamily.Monospace,
                     fontSize = 12.sp,
                     color = Color.White
@@ -616,16 +635,49 @@ fun MainScreen(
                     }
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF956820)),
+                shape = RoundedCornerShape(12.dp),
                 modifier = Modifier
                     .weight(1f)
                     .height(48.dp)
             ) {
                 Text(
-                    text = "Export GLB",
+                    text = "GLB",
                     fontFamily = FontFamily.Monospace,
                     fontSize = 12.sp,
                     color = Color.White
                 )
+            }
+
+            // Shutter Button with Circular Spinner
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier.size(56.dp)
+            ) {
+                if (isProcessingFrame) {
+                    CircularProgressIndicator(
+                        color = Color(0xFF956820),
+                        strokeWidth = 3.dp,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                }
+                FloatingActionButton(
+                    onClick = {
+                        if (!isProcessingFrame) {
+                            shouldTakeSnapshot = true
+                            isProcessingFrame = true
+                        }
+                    },
+                    containerColor = if (isContinuousScanning) Color(0xFF956820).copy(alpha = 0.6f) else Color(0xFF956820),
+                    contentColor = Color.White,
+                    shape = CircleShape,
+                    modifier = Modifier.size(46.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.CameraAlt,
+                        contentDescription = "Capture Snapshot",
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
             }
         }
     }
