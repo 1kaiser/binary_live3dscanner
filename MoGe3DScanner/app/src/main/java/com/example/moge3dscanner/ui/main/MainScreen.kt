@@ -486,29 +486,21 @@ fun MainScreen(
                                                     val positions = result.first
                                                     val colors = result.second
                                                     val numPoints = positions.size / 3
-                                                    val rotatedPositions = FloatArray(positions.size)
-                                                    val R = rotationMatrix.clone()
-                                                    
+                                                    val glPositions = FloatArray(positions.size)
+
+                                                    // Convert MoGe camera-space → OpenGL camera-space:
+                                                    //   MoGe:  X=right  Y=down   Z=into scene
+                                                    //   OpenGL: X=right  Y=up    Z=toward viewer
+                                                    // Gravity alignment happens once in the renderer
+                                                    // via gravityAlignMatrix — not here.
                                                     for (j in 0 until numPoints) {
-                                                        val xc = positions[j * 3]
-                                                        val yc = positions[j * 3 + 1]
-                                                        val zc = positions[j * 3 + 2]
-                                                        
-                                                        val xd = xc
-                                                        val yd = -yc
-                                                        val zd = -zc
-                                                        
-                                                        val xw = R[0] * xd + R[1] * yd + R[2] * zd
-                                                        val yw = R[3] * xd + R[4] * yd + R[5] * zd
-                                                        val zw = R[6] * xd + R[7] * yd + R[8] * zd
-                                                        
-                                                        rotatedPositions[j * 3] = xw
-                                                        rotatedPositions[j * 3 + 1] = zw
-                                                        rotatedPositions[j * 3 + 2] = -yw
+                                                        glPositions[j * 3]     =  positions[j * 3]       // X: right → right
+                                                        glPositions[j * 3 + 1] = -positions[j * 3 + 1]  // Y: down  → up
+                                                        glPositions[j * 3 + 2] = -positions[j * 3 + 2]  // Z: into  → toward viewer
                                                     }
-                                                    
+
                                                     val accumulate = isContinuousScanning
-                                                    accumulator.addFrame(rotatedPositions, colors, accumulate)
+                                                    accumulator.addFrame(glPositions, colors, accumulate)
                                                     val (mergedPositions, mergedColors) = accumulator.getPositionsAndColors()
                                                     
                                                     Handler(Looper.getMainLooper()).post {
@@ -718,17 +710,20 @@ fun MainScreen(
                         val positions = lastPositions
                         val colors = lastColors
 
-                        // 1. Capture gravity-aligned orientation at scan time
-                        //    rotationMatrix is 3x3 row-major from SensorManager.
-                        //    Convert to 4x4 column-major for OpenGL and store as base orientation.
+                        //    R (row-major 3x3) maps device-space → world-space (world Z = up).
+                        //    Points are in OpenGL camera-space (X=right, Y=up, Z=toward viewer).
+                        //    Camera→device flip C: col0=[1,0,0], col1=[0,-1,0], col2=[0,0,-1]
+                        //    gravityAlignMatrix = R * C  => col0=R_col0, col1=-R_col1, col2=-R_col2
                         val R = synchronized(rotationMatrix) { rotationMatrix.clone() }
-                        // Build a 4x4 column-major matrix from 3x3 row-major R:
-                        //   OpenGL col-major[col*4+row] = R_row_major[row*3+col]
                         val grav4x4 = FloatArray(16)
-                        grav4x4[0]  = R[0]; grav4x4[4]  = R[1]; grav4x4[8]  = R[2];  grav4x4[12] = 0f
-                        grav4x4[1]  = R[3]; grav4x4[5]  = R[4]; grav4x4[9]  = R[5];  grav4x4[13] = 0f
-                        grav4x4[2]  = R[6]; grav4x4[6]  = R[7]; grav4x4[10] = R[8];  grav4x4[14] = 0f
-                        grav4x4[3]  = 0f;   grav4x4[7]  = 0f;   grav4x4[11] = 0f;    grav4x4[15] = 1f
+                        // column 0 = R col0 (R is row-major: R[row*3+col])
+                        grav4x4[0]=R[0]; grav4x4[1]=R[3]; grav4x4[2]=R[6]; grav4x4[3]=0f
+                        // column 1 = -R col1
+                        grav4x4[4]=-R[1]; grav4x4[5]=-R[4]; grav4x4[6]=-R[7]; grav4x4[7]=0f
+                        // column 2 = -R col2
+                        grav4x4[8]=-R[2]; grav4x4[9]=-R[5]; grav4x4[10]=-R[8]; grav4x4[11]=0f
+                        // column 3 = translation (none)
+                        grav4x4[12]=0f; grav4x4[13]=0f; grav4x4[14]=0f; grav4x4[15]=1f
                         System.arraycopy(grav4x4, 0, renderer.gravityAlignMatrix, 0, 16)
                         renderer.resetAngles()  // reset user rotation to gravity-aligned default
 
