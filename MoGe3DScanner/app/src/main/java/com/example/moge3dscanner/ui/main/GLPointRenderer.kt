@@ -139,20 +139,30 @@ class GLPointRenderer : GLSurfaceView.Renderer {
         // Apply camera pan (translate view matrix)
         Matrix.translateM(vMatrix, 0, panX, panY, 0f)
 
-        // Rotation & translation matrices
-        val scratch = FloatArray(16)
-        val scratch2 = FloatArray(16)
-        val modelMatrix = FloatArray(16)
-        // Start from gravity-aligned base orientation captured at scan time
-        System.arraycopy(gravityAlignMatrix, 0, modelMatrix, 0, 16)
-        // Apply user tilt (up/down) then spin (left/right) on top of base orientation
-        Matrix.rotateM(modelMatrix, 0, angleY, 1f, 0f, 0f)   // tilt in local space first
-        Matrix.rotateM(modelMatrix, 0, angleX, 0f, 1f, 0f)   // spin around world Y last
-        Matrix.translateM(modelMatrix, 0, -centerX, -centerY, -centerZ)
+        // Step 1: translate cloud to centroid origin
+        val translateM = FloatArray(16)
+        Matrix.setIdentityM(translateM, 0)
+        Matrix.translateM(translateM, 0, -centerX, -centerY, -centerZ)
 
-        // Multiply: View * Model
+        // Step 2: apply gravity-aligned base orientation (captured at scan time)
+        val gravModel = FloatArray(16)
+        Matrix.multiplyMM(gravModel, 0, gravityAlignMatrix, 0, translateM, 0)
+
+        // Step 3: apply user rotation in WORLD space as a left-multiply.
+        // This guarantees horizontal drag (angleX) ALWAYS spins around world-Y,
+        // and vertical drag (angleY) ALWAYS tilts around world-X,
+        // regardless of how gravityAlignMatrix has oriented the cloud.
+        val userRot = FloatArray(16)
+        Matrix.setIdentityM(userRot, 0)
+        Matrix.rotateM(userRot, 0, angleX, 0f, 1f, 0f)  // spin left/right: world Y
+        Matrix.rotateM(userRot, 0, angleY, 1f, 0f, 0f)  // tilt up/down:   world X
+
+        val modelMatrix = FloatArray(16)
+        Matrix.multiplyMM(modelMatrix, 0, userRot, 0, gravModel, 0)
+
+        // MVP = Proj * View * Model
+        val scratch = FloatArray(16)
         Matrix.multiplyMM(scratch, 0, vMatrix, 0, modelMatrix, 0)
-        // Multiply: Projection * (View * Model)
         Matrix.multiplyMM(mvpMatrix, 0, projMatrix, 0, scratch, 0)
 
         // Draw points
