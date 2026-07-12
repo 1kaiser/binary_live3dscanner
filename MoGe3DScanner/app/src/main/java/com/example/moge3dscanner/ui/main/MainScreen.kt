@@ -379,6 +379,20 @@ fun MainScreen(
                 fontSize = 9.sp,
                 color = Color(0xFF535358)
             )
+            // Reset orientation button — no border, inline with status panel
+            Text(
+                text = "↺  Reset View",
+                fontFamily = FontFamily.Monospace,
+                fontSize = 9.sp,
+                color = Color(0xFF956820),
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .clickable {
+                        renderer.resetAngles()
+                        glViewRef.value?.requestRender()
+                    }
+                    .padding(top = 2.dp)
+            )
         }
 
         // 3. Play/Pause Continuous Scanning Mode (top-right overlay)
@@ -773,28 +787,6 @@ fun MainScreen(
                     )
                 }
             } // end shutter Box
-
-            // Orientation Reset Button (↺) — returns view to gravity-aligned default
-            Box(
-                contentAlignment = Alignment.Center,
-                modifier = Modifier
-                    .size(56.dp)
-                    .shadow(2.dp, RoundedCornerShape(16.dp))
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(Color.White)
-                    .border(1.5.dp, Color.Black, RoundedCornerShape(16.dp))
-                    .clickable {
-                        renderer.resetAngles()
-                        glViewRef.value?.requestRender()
-                    }
-            ) {
-                Text(
-                    text = "↺",
-                    fontSize = 20.sp,
-                    color = Color.Black,
-                    fontWeight = FontWeight.Bold
-                )
-            }
         } // end Row
     } // end outer Box
 } // end MainScreen
