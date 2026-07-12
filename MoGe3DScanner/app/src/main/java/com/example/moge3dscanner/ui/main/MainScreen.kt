@@ -32,8 +32,15 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.geometry.Offset
+import kotlin.math.roundToInt
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontFamily
@@ -180,6 +187,10 @@ fun MainScreen(
     var isProcessingFrame by remember { mutableStateOf(false) }
     var shouldTakeSnapshot by remember { mutableStateOf(false) }
 
+    // Dragable/resizable camera Pip states
+    var pipOffset by remember { mutableStateOf(Offset(0f, 0f)) }
+    var pipSizeMultiplier by remember { mutableStateOf(1f) }
+
     // Sensor setup
     val sensorManager = remember { context.getSystemService(Context.SENSOR_SERVICE) as SensorManager }
     val rotationSensor = remember { sensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR) }
@@ -312,78 +323,18 @@ fun MainScreen(
             modifier = Modifier.fillMaxSize()
         )
 
-        // 2. Status / Info Overlay (semi-transparent, top-left overlay inside 3D view)
-        Text(
-            text = "3D POINT CLOUD • $statusText ($activeAccelerator)",
-            fontFamily = FontFamily.Monospace,
-            fontSize = 9.sp,
-            color = Color(0xFF737378),
+        // 2. Status & GPS Info Overlay (semi-transparent, top-left overlay inside 3D view)
+        Column(
             modifier = Modifier
                 .align(Alignment.TopStart)
                 .statusBarsPadding()
                 .padding(16.dp)
-                .background(Color(0xFFF7F6F2).copy(alpha = 0.85f), RoundedCornerShape(4.dp))
-                .padding(horizontal = 8.dp, vertical = 4.dp)
-        )
-
-        // 3. Top Row Controls (Merge switch, GPS info, Continuous scanning toggle)
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .align(Alignment.TopCenter)
-                .statusBarsPadding()
-                .padding(top = 50.dp, start = 16.dp, end = 16.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+                .background(Color(0xFFF7F6F2).copy(alpha = 0.85f), RoundedCornerShape(8.dp))
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            // Merge Controls Card
-            Row(
-                modifier = Modifier
-                    .background(Color(0xFFF7F6F2).copy(alpha = 0.85f), RoundedCornerShape(8.dp))
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Text(
-                    text = "Merge",
-                    fontSize = 11.sp,
-                    fontFamily = FontFamily.Monospace,
-                    color = Color(0xFF1C1B1F)
-                )
-                Switch(
-                    checked = isAccumulateEnabled,
-                    onCheckedChange = { isAccumulateEnabled = it },
-                    colors = SwitchDefaults.colors(
-                        checkedThumbColor = Color(0xFF956820),
-                        checkedTrackColor = Color(0xFFE5D5C0)
-                    ),
-                    modifier = Modifier.scale(0.8f)
-                )
-                Box(
-                    modifier = Modifier
-                        .background(Color.Transparent)
-                        .clickable {
-                            accumulator.clear()
-                            renderer.updatePoints(FloatArray(0), FloatArray(0))
-                            lastPositions = null
-                            lastColors = null
-                            Toast.makeText(context, "Scan cleared", Toast.LENGTH_SHORT).show()
-                        }
-                        .padding(horizontal = 4.dp, vertical = 2.dp)
-                ) {
-                    Text(
-                        text = "CLEAR",
-                        fontSize = 10.sp,
-                        fontFamily = FontFamily.Monospace,
-                        color = Color(0xFF956820),
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            }
-
-            // GPS Coordinates Chip
             val gpsText = if (currentLatitude != null && currentLongitude != null) {
-                String.format("GPS: %.4f, %.4f", currentLatitude, currentLongitude)
+                String.format("GPS: Lat %.4f, Lon %.4f", currentLatitude, currentLongitude)
             } else {
                 "GPS: Searching..."
             }
@@ -391,38 +342,52 @@ fun MainScreen(
                 text = gpsText,
                 fontFamily = FontFamily.Monospace,
                 fontSize = 10.sp,
-                color = Color(0xFF1C1B1F),
-                modifier = Modifier
-                    .background(Color(0xFFF7F6F2).copy(alpha = 0.85f), RoundedCornerShape(8.dp))
-                    .padding(horizontal = 8.dp, vertical = 6.dp)
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFF1C1B1F)
             )
-
-            // Play/Pause Continuous Scanning Mode
-            IconButton(
-                onClick = { isContinuousScanning = !isContinuousScanning },
-                modifier = Modifier
-                    .background(Color(0xFFF7F6F2).copy(alpha = 0.85f), CircleShape)
-                    .size(36.dp)
-            ) {
-                Icon(
-                    imageVector = if (isContinuousScanning) Icons.Default.Pause else Icons.Default.PlayArrow,
-                    contentDescription = "Toggle Scan Mode",
-                    tint = Color(0xFF956820),
-                    modifier = Modifier.size(20.dp)
-                )
-            }
+            Text(
+                text = "3D POINT CLOUD • $statusText ($activeAccelerator)",
+                fontFamily = FontFamily.Monospace,
+                fontSize = 9.sp,
+                color = Color(0xFF535358)
+            )
         }
 
-        // 4. Floating Camera Preview (Picture-in-Picture window)
+        // 3. Play/Pause Continuous Scanning Mode (top-right overlay)
+        IconButton(
+            onClick = { isContinuousScanning = !isContinuousScanning },
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .statusBarsPadding()
+                .padding(16.dp)
+                .background(Color(0xFFF7F6F2).copy(alpha = 0.85f), CircleShape)
+                .size(36.dp)
+        ) {
+            Icon(
+                imageVector = if (isContinuousScanning) Icons.Default.Pause else Icons.Default.PlayArrow,
+                contentDescription = "Toggle Scan Mode",
+                tint = Color(0xFF956820),
+                modifier = Modifier.size(20.dp)
+            )
+        }
+
+        // 4. Floating Camera Preview (Picture-in-Picture window - Dragable & Resizable)
         Box(
             modifier = Modifier
                 .align(Alignment.BottomEnd)
-                .padding(bottom = 90.dp, end = 16.dp)
-                .size(width = 110.dp, height = 145.dp)
+                .offset { IntOffset(pipOffset.x.roundToInt(), pipOffset.y.roundToInt()) }
+                .padding(bottom = (LocalConfiguration.current.screenHeightDp * 0.2f).dp + 16.dp, end = 16.dp)
+                .size(width = (110 * pipSizeMultiplier).dp, height = (145 * pipSizeMultiplier).dp)
                 .shadow(6.dp, RoundedCornerShape(12.dp))
                 .clip(RoundedCornerShape(12.dp))
                 .background(Color.Black)
                 .border(2.dp, Color.White, RoundedCornerShape(12.dp))
+                .pointerInput(Unit) {
+                    detectTransformGestures { _, pan, zoom, _ ->
+                        pipOffset += pan
+                        pipSizeMultiplier = (pipSizeMultiplier * zoom).coerceIn(0.5f, 3.0f)
+                    }
+                }
         ) {
             AndroidView(
                 factory = { ctx ->
@@ -492,7 +457,8 @@ fun MainScreen(
                                                         rotatedPositions[j * 3 + 2] = -yw
                                                     }
                                                     
-                                                    val accumulate = isAccumulateEnabled
+                                                    // Continuous scanning appends points, manual clear on snap is handled by button click
+                                                    val accumulate = isContinuousScanning
                                                     accumulator.addFrame(rotatedPositions, colors, accumulate)
                                                     val (mergedPositions, mergedColors) = accumulator.getPositionsAndColors()
                                                     
@@ -548,14 +514,14 @@ fun MainScreen(
             )
         }
 
-        // 5. Bottom Control Row (PLY, GLB and Camera Shutter Button side by side)
+        // 5. Bottom Control Panel (PLY, GLB, Shutter side-by-side using bottom 20% of screen height)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .fillMaxHeight(0.2f)
                 .align(Alignment.BottomCenter)
-                .navigationBarsPadding()
-                .padding(horizontal = 16.dp, vertical = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                .background(Color(0xFF956820)),
+            horizontalArrangement = Arrangement.spacedBy(1.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             // Export PLY Button
@@ -590,15 +556,15 @@ fun MainScreen(
                     }
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF956820)),
-                shape = RoundedCornerShape(12.dp),
+                shape = RectangleShape,
                 modifier = Modifier
                     .weight(1f)
-                    .height(48.dp)
+                    .fillMaxHeight()
             ) {
                 Text(
                     text = "PLY",
                     fontFamily = FontFamily.Monospace,
-                    fontSize = 12.sp,
+                    fontSize = 14.sp,
                     color = Color.White
                 )
             }
@@ -634,48 +600,51 @@ fun MainScreen(
                         Toast.makeText(context, "No scan data available yet.", Toast.LENGTH_SHORT).show()
                     }
                 },
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF956820)),
-                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF855A1A)),
+                shape = RectangleShape,
                 modifier = Modifier
                     .weight(1f)
-                    .height(48.dp)
+                    .fillMaxHeight()
             ) {
                 Text(
                     text = "GLB",
                     fontFamily = FontFamily.Monospace,
-                    fontSize = 12.sp,
+                    fontSize = 14.sp,
                     color = Color.White
                 )
             }
 
-            // Shutter Button with Circular Spinner
+            // Camera Shutter Button (Square, Auto-clears prior data on click)
             Box(
                 contentAlignment = Alignment.Center,
-                modifier = Modifier.size(56.dp)
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight()
+                    .background(Color(0xFF704812))
+                    .clickable(enabled = !isProcessingFrame) {
+                        // 1. Clear previous point cloud before starting new analysis
+                        accumulator.clear()
+                        renderer.updatePoints(FloatArray(0), FloatArray(0))
+                        lastPositions = null
+                        lastColors = null
+                        
+                        // 2. Trigger new snapshot
+                        shouldTakeSnapshot = true
+                        isProcessingFrame = true
+                    }
             ) {
                 if (isProcessingFrame) {
                     CircularProgressIndicator(
-                        color = Color(0xFF956820),
+                        color = Color.White,
                         strokeWidth = 3.dp,
-                        modifier = Modifier.fillMaxSize()
+                        modifier = Modifier.size(36.dp)
                     )
-                }
-                FloatingActionButton(
-                    onClick = {
-                        if (!isProcessingFrame) {
-                            shouldTakeSnapshot = true
-                            isProcessingFrame = true
-                        }
-                    },
-                    containerColor = if (isContinuousScanning) Color(0xFF956820).copy(alpha = 0.6f) else Color(0xFF956820),
-                    contentColor = Color.White,
-                    shape = CircleShape,
-                    modifier = Modifier.size(46.dp)
-                ) {
+                } else {
                     Icon(
                         imageVector = Icons.Default.CameraAlt,
                         contentDescription = "Capture Snapshot",
-                        modifier = Modifier.size(20.dp)
+                        tint = Color.White,
+                        modifier = Modifier.size(28.dp)
                     )
                 }
             }

@@ -2,7 +2,11 @@
 
 A self-contained Android application that performs live 3D reconstruction from single-camera RGB images in real-time, utilizing the **MoGe** monocular geometry model running on-device.
 
-![UI Screenshot](screenshot.png)
+### 📸 Evolution & Progress of the UI
+
+| Generation 1: Split Screen Layout | Generation 2: Full-screen Background with PiP & Square Bottom Panel |
+|:---:|:---:|
+| ![Split Screen Layout](screenshot.png) | ![PiP with Square Buttons](screenshot_pip_square.png) |
 
 ---
 
