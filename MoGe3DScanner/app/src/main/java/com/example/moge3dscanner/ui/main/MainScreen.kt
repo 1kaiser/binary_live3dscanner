@@ -169,12 +169,12 @@ class InteractiveGLView(context: Context, val renderer: GLPointRenderer) : GLSur
 
                             // Create delta rotation around screen-space axis
                             val deltaRot = FloatArray(16)
-                            Matrix.setIdentityM(deltaRot, 0)
-                            Matrix.rotateM(deltaRot, 0, angle, axisX, axisY, 0f)
+                            android.opengl.Matrix.setIdentityM(deltaRot, 0)
+                            android.opengl.Matrix.rotateM(deltaRot, 0, angle, axisX, axisY, 0f)
 
                             // Multiply on the left of cumulative user rotation
                             val temp = FloatArray(16)
-                            Matrix.multiplyMM(temp, 0, deltaRot, 0, renderer.userRotationMatrix, 0)
+                            android.opengl.Matrix.multiplyMM(temp, 0, deltaRot, 0, renderer.userRotationMatrix, 0)
                             System.arraycopy(temp, 0, renderer.userRotationMatrix, 0, 16)
 
                             // Set roll velocity & axis for momentum glide
@@ -428,7 +428,7 @@ fun MainScreen(
                 fontSize = 9.sp,
                 color = Color(0xFF535358)
             )
-            // Row for Reset View and Multi Mode buttons
+            // Row 1: Reset View and Multi Mode
             Row(
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -463,6 +463,13 @@ fun MainScreen(
                         }
                     }
                 )
+            }
+            // Row 2: Dataset Rec and Flash
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(top = 2.dp)
+            ) {
                 Text(
                     text = if (isRecordDatasetMode) "✓  Dataset Rec" else "☐  Dataset Rec",
                     fontFamily = FontFamily.Monospace,
@@ -923,6 +930,9 @@ fun MainScreen(
                         modifier = Modifier.size(28.dp)
                     )
                 }
+            } // end shutter Box
+        } // end Row
+
         // 6. Embedded <model-viewer> WebView overlay
         if (isViewingModel && modelBase64.isNotEmpty()) {
             Box(
