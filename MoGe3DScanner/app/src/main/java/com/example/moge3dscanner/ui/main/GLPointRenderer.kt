@@ -58,15 +58,16 @@ class GLPointRenderer : GLSurfaceView.Renderer {
     var angleY: Float = 0f
     var angleZ: Float = 0f
     var zoom: Float = 3.0f
+    var panX: Float = 0f
+    var panY: Float = 0f
 
     // Target values to interpolate towards (Space Opera/model-viewer style controls)
     var targetAngleX: Float = 0f
     var targetAngleY: Float = 0f
     var targetAngleZ: Float = 0f
     var targetZoom: Float = 3.0f
-
-    var panX: Float = 0f
-    var panY: Float = 0f
+    var targetPanX: Float = 0f
+    var targetPanY: Float = 0f
 
     // Gravity-aligned base orientation captured at scan time (4x4 column-major)
     val gravityAlignMatrix: FloatArray = FloatArray(16).also { Matrix.setIdentityM(it, 0) }
@@ -81,6 +82,8 @@ class GLPointRenderer : GLSurfaceView.Renderer {
         targetAngleY = 0f
         targetAngleZ = 0f
         targetZoom = 3.0f
+        targetPanX = 0f
+        targetPanY = 0f
         angleX = 0f
         angleY = 0f
         angleZ = 0f
@@ -165,25 +168,33 @@ class GLPointRenderer : GLSurfaceView.Renderer {
         val diffY = targetAngleY - angleY
         val diffZ = targetAngleZ - angleZ
         val diffZoom = targetZoom - zoom
+        val diffPanX = targetPanX - panX
+        val diffPanY = targetPanY - panY
 
         val threshold = 0.01f
         val zoomThreshold = 0.01f
+        val panThreshold = 0.001f
         val isAnimatingX = Math.abs(diffX) > threshold
         val isAnimatingY = Math.abs(diffY) > threshold
         val isAnimatingZ = Math.abs(diffZ) > threshold
         val isAnimatingZoom = Math.abs(diffZoom) > zoomThreshold
+        val isAnimatingPan = Math.abs(diffPanX) > panThreshold || Math.abs(diffPanY) > panThreshold
 
-        if (isAnimatingX || isAnimatingY || isAnimatingZ || isAnimatingZoom) {
+        if (isAnimatingX || isAnimatingY || isAnimatingZ || isAnimatingZoom || isAnimatingPan) {
             angleX += diffX * factor
             angleY += diffY * factor
             angleZ += diffZ * factor
             zoom += diffZoom * factor
+            panX += diffPanX * factor
+            panY += diffPanY * factor
             requestRenderListener?.invoke()
         } else {
             angleX = targetAngleX
             angleY = targetAngleY
             angleZ = targetAngleZ
             zoom = targetZoom
+            panX = targetPanX
+            panY = targetPanY
             lastFrameTimeNs = 0L
         }
 

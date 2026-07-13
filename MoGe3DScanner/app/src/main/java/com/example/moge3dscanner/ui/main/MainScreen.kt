@@ -109,25 +109,27 @@ class InteractiveGLView(context: Context, val renderer: GLPointRenderer) : GLSur
         val pointerCount = event.pointerCount
 
         if (pointerCount == 2) {
-            val x0 = event.getX(0)
-            val y0 = event.getY(0)
-            val x1 = event.getX(1)
-            val y1 = event.getY(1)
+            val midX = (event.getX(0) + event.getX(1)) / 2f
+            val midY = (event.getY(0) + event.getY(1)) / 2f
 
             when (event.actionMasked) {
                 MotionEvent.ACTION_POINTER_DOWN -> {
                     isPanning = true
-                    previousTwoFingerAngle = Math.atan2((y1 - y0).toDouble(), (x1 - x0).toDouble()).toFloat()
+                    previousMidX = midX
+                    previousMidY = midY
                 }
                 MotionEvent.ACTION_MOVE -> {
                     if (isPanning) {
-                        val currentAngle = Math.atan2((y1 - y0).toDouble(), (x1 - x0).toDouble()).toFloat()
-                        var deltaAngle = Math.toDegrees((currentAngle - previousTwoFingerAngle).toDouble()).toFloat()
-                        if (deltaAngle < -180f) deltaAngle += 360f
-                        if (deltaAngle > 180f) deltaAngle -= 360f
+                        val dx = midX - previousMidX
+                        val dy = midY - previousMidY
 
-                        renderer.targetAngleZ += deltaAngle
-                        previousTwoFingerAngle = currentAngle
+                        // Scale pan sensitivity by current zoom
+                        val sensitivity = 0.0015f * renderer.zoom
+                        renderer.targetPanX += dx * sensitivity
+                        renderer.targetPanY -= dy * sensitivity // Flip Y axis
+                        
+                        previousMidX = midX
+                        previousMidY = midY
                         requestRender()
                     }
                 }
