@@ -156,7 +156,7 @@ class InteractiveGLView(context: Context, val renderer: GLPointRenderer) : GLSur
                         val dy = y - previousY
 
                         renderer.angleX += dx * 0.15f
-                        renderer.angleY -= dy * 0.15f
+                        renderer.angleY += dy * 0.15f
                         requestRender()
                     }
                     previousX = x
