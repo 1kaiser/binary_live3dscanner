@@ -233,6 +233,11 @@ fun MainScreen(
     var isProcessingFrame by remember { mutableStateOf(false) }
     val shouldTakeSnapshot = remember { AtomicBoolean(false) }
 
+    var isRecordDatasetMode by remember { mutableStateOf(false) }
+    val isRecordDatasetModeActive = remember { AtomicBoolean(false) }
+    val currentDatasetDirRef = remember { java.util.concurrent.atomic.AtomicReference<java.io.File?>(null) }
+    val datasetFrameCountRef = remember { java.util.concurrent.atomic.AtomicInteger(0) }
+
     // Dragable/resizable camera Pip states
     var pipOffset by remember { mutableStateOf(Offset(0f, 0f)) }
     var pipSizeMultiplier by remember { mutableStateOf(1f) }
@@ -448,6 +453,21 @@ fun MainScreen(
                         }
                     }
                 )
+                Text(
+                    text = if (isRecordDatasetMode) "✓  Dataset Rec" else "☐  Dataset Rec",
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 9.sp,
+                    color = if (isRecordDatasetMode) Color(0xFF4CAF50) else Color(0xFF956820),
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.clickable {
+                        isRecordDatasetMode = !isRecordDatasetMode
+                        isRecordDatasetModeActive.set(isRecordDatasetMode)
+                        if (!isRecordDatasetMode) {
+                            currentDatasetDirRef.set(null)
+                            datasetFrameCountRef.set(0)
+                        }
+                    }
+                )
             }
         }
 
@@ -555,14 +575,24 @@ fun MainScreen(
                                                         glPositions[j * 3 + 2] = -positions[j * 3 + 2]  // Z: into  → toward viewer
                                                     }
 
+                                                    val R_i = synchronized(captureRotationMatrix) { captureRotationMatrix.clone() }
+                                                    val R_0 = synchronized(firstFrameRotationMatrix) { firstFrameRotationMatrix.clone() }
+                                                    val R_0_T = transpose3x3(R_0)
+                                                    val R_rel = multiply3x3(R_0_T, R_i)
+
                                                     if (isMultiModeSnapshot.get()) {
-                                                        val R_i = synchronized(captureRotationMatrix) { captureRotationMatrix.clone() }
-                                                        val R_0 = synchronized(firstFrameRotationMatrix) { firstFrameRotationMatrix.clone() }
-                                                        val R_0_T = transpose3x3(R_0)
-                                                        val R_rel = multiply3x3(R_0_T, R_i)
-                                                        
                                                         for (j in 0 until numPoints) {
                                                             rotatePoint3x3(glPositions, j * 3, R_rel)
+                                                        }
+                                                    }
+
+                                                    // Save dataset frame if recording mode is active
+                                                    if (isRecordDatasetModeActive.get()) {
+                                                        val dir = currentDatasetDirRef.get()
+                                                        if (dir != null) {
+                                                            val frameIndex = datasetFrameCountRef.getAndIncrement()
+                                                            saveDatasetFrame(context, dir, frameIndex, rotatedBitmap, positions, R_rel)
+                                                            writeStateFile(dir, frameIndex + 1, 518, 518)
                                                         }
                                                     }
 
@@ -797,7 +827,19 @@ fun MainScreen(
                             grav4x4[8]=R[2]; grav4x4[9]=R[5]; grav4x4[10]=R[8]; grav4x4[11]=0f
                             grav4x4[12]=0f; grav4x4[13]=0f; grav4x4[14]=0f; grav4x4[15]=1f
                             System.arraycopy(grav4x4, 0, renderer.gravityAlignMatrix, 0, 16)
-                            renderer.resetAngles()
+                        }
+
+                        // Initialize dataset directory if Record Dataset Mode is active
+                        if (isRecordDatasetMode) {
+                            if (currentDatasetDirRef.get() == null) {
+                                val baseDir = context.getExternalFilesDir("datasets")
+                                val dir = java.io.File(baseDir, "dataset_${System.currentTimeMillis()}").apply { mkdirs() }
+                                currentDatasetDirRef.set(dir)
+                                datasetFrameCountRef.set(0)
+                                writeStateFile(dir, 0, 518, 518)
+                                writeRotationFile(dir, 0f)
+                                Toast.makeText(context, "Recording dataset to ${dir.name}!", Toast.LENGTH_SHORT).show()
+                            }
                         }
 
                         // 2. Trigger new snapshot
@@ -1128,4 +1170,87 @@ private fun transpose3x3(A: FloatArray): FloatArray {
     T[3] = A[1]; T[4] = A[4]; T[5] = A[7]
     T[6] = A[2]; T[7] = A[5]; T[8] = A[8]
     return T
+}
+
+private fun saveDatasetFrame(
+    context: Context,
+    datasetDir: java.io.File,
+    frameIndex: Int,
+    bitmap: Bitmap,
+    rawPositions: FloatArray,
+    R_rel: FloatArray
+) {
+    try {
+        val prefix = String.format(java.util.Locale.US, "%08d", frameIndex)
+
+        // 1. Save Image (.jpg)
+        val imageFile = java.io.File(datasetDir, "$prefix.jpg")
+        java.io.FileOutputStream(imageFile).use { out ->
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
+        }
+
+        // 2. Save Point Cloud (.pcl)
+        val numPoints = rawPositions.size / 3
+        val pclFile = java.io.File(datasetDir, "$prefix.pcl")
+        java.io.FileOutputStream(pclFile).use { out ->
+            val byteBuffer = java.nio.ByteBuffer.allocate(4 + numPoints * 16).apply {
+                order(java.nio.ByteOrder.LITTLE_ENDIAN)
+                putInt(numPoints)
+                for (i in 0 until numPoints) {
+                    putFloat(rawPositions[i * 3])
+                    putFloat(rawPositions[i * 3 + 1])
+                    putFloat(rawPositions[i * 3 + 2])
+                    putFloat(1.0f) // Confidence
+                }
+            }
+            out.write(byteBuffer.array())
+        }
+
+        // 3. Save Matrices (.mat)
+        val r = R_rel
+        val matFile = java.io.File(datasetDir, "$prefix.mat")
+        matFile.printWriter().use { pw ->
+            // Matrix 1 (COLOR_CAMERA)
+            pw.printf(java.util.Locale.US, "%f %f %f 0.000000\n", r[0], -r[1], -r[2])
+            pw.printf(java.util.Locale.US, "%f %f %f 0.000000\n", r[3], -r[4], -r[5])
+            pw.printf(java.util.Locale.US, "%f %f %f 0.000000\n", r[6], -r[7], -r[8])
+            pw.printf(java.util.Locale.US, "0.000000 0.000000 0.000000 1.000000\n")
+
+            // Matrix 2 (OPENGL_CAMERA)
+            pw.printf(java.util.Locale.US, "%f %f %f 0.000000\n", r[0], -r[1], -r[2])
+            pw.printf(java.util.Locale.US, "%f %f %f 0.000000\n", r[3], -r[4], -r[5])
+            pw.printf(java.util.Locale.US, "%f %f %f 0.000000\n", r[6], -r[7], -r[8])
+            pw.printf(java.util.Locale.US, "0.000000 0.000000 0.000000 1.000000\n")
+
+            // Matrix 3 (SCREEN_CAMERA)
+            pw.printf(java.util.Locale.US, "%f %f %f 0.000000\n", r[0], r[3], r[6])
+            pw.printf(java.util.Locale.US, "%f %f %f 0.000000\n", -r[1], -r[4], -r[7])
+            pw.printf(java.util.Locale.US, "%f %f %f 0.000000\n", -r[2], -r[5], -r[8])
+            pw.printf(java.util.Locale.US, "0.000000 0.000000 0.000000 1.000000\n")
+        }
+    } catch (e: Exception) {
+        Log.e("DatasetRec", "Failed to save frame $frameIndex", e)
+    }
+}
+
+private fun writeStateFile(datasetDir: java.io.File, count: Int, width: Int, height: Int) {
+    try {
+        val stateFile = java.io.File(datasetDir, "state.txt")
+        stateFile.printWriter().use { pw ->
+            pw.printf(java.util.Locale.US, "%d %d %d 259.000000 259.000000 500.000000 500.000000\n", count, width, height)
+        }
+    } catch (e: Exception) {
+        Log.e("DatasetRec", "Failed to write state.txt", e)
+    }
+}
+
+private fun writeRotationFile(datasetDir: java.io.File, yaw: Float) {
+    try {
+        val rotFile = java.io.File(datasetDir, "rotation.txt")
+        rotFile.printWriter().use { pw ->
+            pw.printf(java.util.Locale.US, "%f\n", yaw)
+        }
+    } catch (e: Exception) {
+        Log.e("DatasetRec", "Failed to write rotation.txt", e)
+    }
 }
