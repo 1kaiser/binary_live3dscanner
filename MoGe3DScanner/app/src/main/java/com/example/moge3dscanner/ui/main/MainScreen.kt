@@ -238,6 +238,9 @@ fun MainScreen(
     val currentDatasetDirRef = remember { java.util.concurrent.atomic.AtomicReference<java.io.File?>(null) }
     val datasetFrameCountRef = remember { java.util.concurrent.atomic.AtomicInteger(0) }
 
+    var isViewingModel by remember { mutableStateOf(false) }
+    var modelBase64 by remember { mutableStateOf("") }
+
     // Dragable/resizable camera Pip states
     var pipOffset by remember { mutableStateOf(Offset(0f, 0f)) }
     var pipSizeMultiplier by remember { mutableStateOf(1f) }
@@ -757,6 +760,10 @@ fun MainScreen(
                                     }
                                     val gpsTag = if (currentLatitude != null && currentLongitude != null) " (GPS tagged)" else ""
                                     Toast.makeText(context, "GLB saved to Downloads!$gpsTag", Toast.LENGTH_SHORT).show()
+
+                                    // Open model-viewer embedded preview
+                                    modelBase64 = android.util.Base64.encodeToString(glbData, android.util.Base64.NO_WRAP)
+                                    isViewingModel = true
                                 } else {
                                     Toast.makeText(context, "Failed to create GLB file.", Toast.LENGTH_SHORT).show()
                                 }
@@ -897,8 +904,39 @@ fun MainScreen(
                         modifier = Modifier.size(28.dp)
                     )
                 }
-            } // end shutter Box
-        } // end Row
+        // 6. Embedded <model-viewer> WebView overlay
+        if (isViewingModel && modelBase64.isNotEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color(0xFF121212))
+            ) {
+                AndroidView(
+                    factory = { ctx ->
+                        android.webkit.WebView(ctx).apply {
+                            settings.javaScriptEnabled = true
+                            settings.domStorageEnabled = true
+                            settings.loadWithOverviewMode = true
+                            settings.useWideViewPort = true
+                            webViewClient = android.webkit.WebViewClient()
+                            loadDataWithBaseURL("https://ajax.googleapis.com", getModelViewerHtml(modelBase64), "text/html", "utf-8", null)
+                        }
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
+
+                // Close Button in top-right
+                Button(
+                    onClick = { isViewingModel = false },
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(16.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color.Black.copy(alpha = 0.6f))
+                ) {
+                    Text(text = "Close", color = Color.White, fontFamily = FontFamily.Monospace)
+                }
+            }
+        }
     } // end outer Box
 } // end MainScreen
 
@@ -1253,4 +1291,30 @@ private fun writeRotationFile(datasetDir: java.io.File, yaw: Float) {
     } catch (e: Exception) {
         Log.e("DatasetRec", "Failed to write rotation.txt", e)
     }
+}
+
+private fun getModelViewerHtml(base64Data: String): String {
+    return """
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.5.0/model-viewer.min.js"></script>
+            <style>
+                body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #121212; }
+                model-viewer { width: 100%; height: 100%; --poster-color: transparent; }
+            </style>
+        </head>
+        <body>
+            <model-viewer 
+                src="data:model/gltf-binary;base64,$base64Data" 
+                camera-controls 
+                auto-rotate 
+                shadow-intensity="1" 
+                interaction-prompt="auto"
+                style="background-color: #121212;">
+            </model-viewer>
+        </body>
+        </html>
+    """.trimIndent()
 }
