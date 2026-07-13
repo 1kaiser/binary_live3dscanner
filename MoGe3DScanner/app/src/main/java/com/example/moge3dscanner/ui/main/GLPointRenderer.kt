@@ -241,8 +241,8 @@ class GLPointRenderer : GLSurfaceView.Renderer {
         // regardless of how gravityAlignMatrix has oriented the cloud.
         val userRot = FloatArray(16)
         Matrix.setIdentityM(userRot, 0)
-        Matrix.rotateM(userRot, 0, angleX, 0f, 1f, 0f)  // spin left/right: world Y
-        Matrix.rotateM(userRot, 0, angleY, 1f, 0f, 0f)  // tilt up/down:   world X
+        Matrix.rotateM(userRot, 0, angleY, 1f, 0f, 0f)  // tilt up/down:   world X (applied last, locks to screen-horizontal)
+        Matrix.rotateM(userRot, 0, angleX, 0f, 1f, 0f)  // spin left/right: world Y (applied first)
         Matrix.rotateM(userRot, 0, angleZ, 0f, 0f, 1f)  // roll:            world Z
 
         val modelMatrix = FloatArray(16)
