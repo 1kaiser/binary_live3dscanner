@@ -241,6 +241,13 @@ fun MainScreen(
     var isViewingModel by remember { mutableStateOf(false) }
     var modelBase64 by remember { mutableStateOf("") }
 
+    var isFlashlightOn by remember { mutableStateOf(false) }
+    var cameraInstance by remember { mutableStateOf<androidx.camera.core.Camera?>(null) }
+
+    LaunchedEffect(isFlashlightOn) {
+        cameraInstance?.cameraControl?.enableTorch(isFlashlightOn)
+    }
+
     // Dragable/resizable camera Pip states
     var pipOffset by remember { mutableStateOf(Offset(0f, 0f)) }
     var pipSizeMultiplier by remember { mutableStateOf(1f) }
@@ -471,6 +478,16 @@ fun MainScreen(
                         }
                     }
                 )
+                Text(
+                    text = if (isFlashlightOn) "✓  Flash" else "☐  Flash",
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 9.sp,
+                    color = if (isFlashlightOn) Color(0xFF4CAF50) else Color(0xFF956820),
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.clickable {
+                        isFlashlightOn = !isFlashlightOn
+                    }
+                )
             }
         }
 
@@ -645,7 +662,8 @@ fun MainScreen(
                                 preview,
                                 imageAnalyzer
                             )
-                            camera.cameraControl.enableTorch(true)
+                            cameraInstance = camera
+                            camera.cameraControl.enableTorch(isFlashlightOn)
                             statusText = "Scanning"
                         } catch (exc: Exception) {
                             Log.e("CameraX", "Use case binding failed", exc)
