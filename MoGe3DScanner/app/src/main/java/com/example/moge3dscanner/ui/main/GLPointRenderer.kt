@@ -69,6 +69,11 @@ class GLPointRenderer : GLSurfaceView.Renderer {
     var targetPanX: Float = 0f
     var targetPanY: Float = 0f
 
+    // Velocity momentum (flick-to-spin)
+    var spinVelocityX: Float = 0f
+    var spinVelocityY: Float = 0f
+    var isTouching: Boolean = false
+
     // Gravity-aligned base orientation captured at scan time (4x4 column-major)
     val gravityAlignMatrix: FloatArray = FloatArray(16).also { Matrix.setIdentityM(it, 0) }
 
@@ -90,6 +95,9 @@ class GLPointRenderer : GLSurfaceView.Renderer {
         zoom = 3.0f
         panX = 0f
         panY = 0f
+        spinVelocityX = 0f
+        spinVelocityY = 0f
+        isTouching = false
         lastFrameTimeNs = 0L
     }
 
@@ -164,6 +172,20 @@ class GLPointRenderer : GLSurfaceView.Renderer {
         val decay = 12f // Damping factor matching model-viewer's default style feel
         val factor = (1.0f - Math.exp((-decay * dt).toDouble())).toFloat()
 
+        // Apply momentum (flick-to-spin) when user is not touching the screen
+        if (!isTouching) {
+            val frictionDecay = 4.0f
+            val frictionFactor = Math.exp((-frictionDecay * dt).toDouble()).toFloat()
+            spinVelocityX *= frictionFactor
+            spinVelocityY *= frictionFactor
+
+            if (Math.abs(spinVelocityX) < 0.02f) spinVelocityX = 0f
+            if (Math.abs(spinVelocityY) < 0.02f) spinVelocityY = 0f
+
+            targetAngleX += spinVelocityX
+            targetAngleY += spinVelocityY
+        }
+
         val diffX = targetAngleX - angleX
         val diffY = targetAngleY - angleY
         val diffZ = targetAngleZ - angleZ
@@ -179,8 +201,9 @@ class GLPointRenderer : GLSurfaceView.Renderer {
         val isAnimatingZ = Math.abs(diffZ) > threshold
         val isAnimatingZoom = Math.abs(diffZoom) > zoomThreshold
         val isAnimatingPan = Math.abs(diffPanX) > panThreshold || Math.abs(diffPanY) > panThreshold
+        val isAnimatingVelocity = spinVelocityX != 0f || spinVelocityY != 0f
 
-        if (isAnimatingX || isAnimatingY || isAnimatingZ || isAnimatingZoom || isAnimatingPan) {
+        if (isAnimatingX || isAnimatingY || isAnimatingZ || isAnimatingZoom || isAnimatingPan || isAnimatingVelocity) {
             angleX += diffX * factor
             angleY += diffY * factor
             angleZ += diffZ * factor

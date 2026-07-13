@@ -152,6 +152,9 @@ class InteractiveGLView(context: Context, val renderer: GLPointRenderer) : GLSur
                     previousX = x
                     previousY = y
                     isPanning = false
+                    renderer.isTouching = true
+                    renderer.spinVelocityX = 0f
+                    renderer.spinVelocityY = 0f
                 }
                 MotionEvent.ACTION_MOVE -> {
                     if (!isPanning) {
@@ -160,10 +163,16 @@ class InteractiveGLView(context: Context, val renderer: GLPointRenderer) : GLSur
 
                         renderer.targetAngleX += dx * 0.15f
                         renderer.targetAngleY += dy * 0.15f
+                        renderer.spinVelocityX = dx * 0.15f
+                        renderer.spinVelocityY = dy * 0.15f
                         requestRender()
                     }
                     previousX = x
                     previousY = y
+                }
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    renderer.isTouching = false
+                    requestRender()
                 }
             }
         }
