@@ -56,6 +56,7 @@ class GLPointRenderer : GLSurfaceView.Renderer {
     // Touch interaction values
     var angleX: Float = 0f
     var angleY: Float = 0f
+    var angleZ: Float = 0f
     var zoom: Float = 3.0f
     var panX: Float = 0f
     var panY: Float = 0f
@@ -67,6 +68,7 @@ class GLPointRenderer : GLSurfaceView.Renderer {
     fun resetAngles() {
         angleX = 0f
         angleY = 0f
+        angleZ = 0f
         panX = 0f
         panY = 0f
     }
@@ -156,6 +158,7 @@ class GLPointRenderer : GLSurfaceView.Renderer {
         Matrix.setIdentityM(userRot, 0)
         Matrix.rotateM(userRot, 0, angleX, 0f, 1f, 0f)  // spin left/right: world Y
         Matrix.rotateM(userRot, 0, angleY, 1f, 0f, 0f)  // tilt up/down:   world X
+        Matrix.rotateM(userRot, 0, angleZ, 0f, 0f, 1f)  // roll:            world Z
 
         val modelMatrix = FloatArray(16)
         Matrix.multiplyMM(modelMatrix, 0, userRot, 0, gravModel, 0)

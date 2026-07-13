@@ -76,6 +76,7 @@ import java.nio.ByteOrder
 class InteractiveGLView(context: Context, val renderer: GLPointRenderer) : GLSurfaceView(context) {
     private var previousX: Float = 0f
     private var previousY: Float = 0f
+    private var previousTwoFingerAngle = 0f
 
     private val scaleDetector = ScaleGestureDetector(context, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
         override fun onScale(detector: ScaleGestureDetector): Boolean {
@@ -107,28 +108,27 @@ class InteractiveGLView(context: Context, val renderer: GLPointRenderer) : GLSur
         val pointerCount = event.pointerCount
 
         if (pointerCount == 2) {
-            val midX = (event.getX(0) + event.getX(1)) / 2f
-            val midY = (event.getY(0) + event.getY(1)) / 2f
+            val x0 = event.getX(0)
+            val y0 = event.getY(0)
+            val x1 = event.getX(1)
+            val y1 = event.getY(1)
 
             when (event.actionMasked) {
                 MotionEvent.ACTION_POINTER_DOWN -> {
-                    previousMidX = midX
-                    previousMidY = midY
                     isPanning = true
+                    previousTwoFingerAngle = Math.atan2((y1 - y0).toDouble(), (x1 - x0).toDouble()).toFloat()
                 }
                 MotionEvent.ACTION_MOVE -> {
                     if (isPanning) {
-                        val dx = midX - previousMidX
-                        val dy = midY - previousMidY
+                        val currentAngle = Math.atan2((y1 - y0).toDouble(), (x1 - x0).toDouble()).toFloat()
+                        var deltaAngle = Math.toDegrees((currentAngle - previousTwoFingerAngle).toDouble()).toFloat()
+                        if (deltaAngle < -180f) deltaAngle += 360f
+                        if (deltaAngle > 180f) deltaAngle -= 360f
 
-                        // Scale pan sensitivity by current zoom
-                        val sensitivity = 0.0015f * renderer.zoom
-                        renderer.panX += dx * sensitivity
-                        renderer.panY -= dy * sensitivity // Flip Y axis
+                        renderer.angleZ += deltaAngle
+                        previousTwoFingerAngle = currentAngle
                         requestRender()
                     }
-                    previousMidX = midX
-                    previousMidY = midY
                 }
                 MotionEvent.ACTION_POINTER_UP -> {
                     isPanning = false
