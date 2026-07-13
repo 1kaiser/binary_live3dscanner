@@ -53,24 +53,41 @@ class GLPointRenderer : GLSurfaceView.Renderer {
     // Listener for rendering trigger
     var onNewPointsListener: (() -> Unit)? = null
 
-    // Touch interaction values
+    // Touch interaction values (current interpolated state)
     var angleX: Float = 0f
     var angleY: Float = 0f
     var angleZ: Float = 0f
     var zoom: Float = 3.0f
+
+    // Target values to interpolate towards (Space Opera/model-viewer style controls)
+    var targetAngleX: Float = 0f
+    var targetAngleY: Float = 0f
+    var targetAngleZ: Float = 0f
+    var targetZoom: Float = 3.0f
+
     var panX: Float = 0f
     var panY: Float = 0f
 
     // Gravity-aligned base orientation captured at scan time (4x4 column-major)
     val gravityAlignMatrix: FloatArray = FloatArray(16).also { Matrix.setIdentityM(it, 0) }
 
+    // Smooth camera transition animation tracking
+    private var lastFrameTimeNs: Long = 0L
+    var requestRenderListener: (() -> Unit)? = null
+
     /** Resets user-applied rotation and pan back to the gravity-aligned default. */
     fun resetAngles() {
+        targetAngleX = 0f
+        targetAngleY = 0f
+        targetAngleZ = 0f
+        targetZoom = 3.0f
         angleX = 0f
         angleY = 0f
         angleZ = 0f
+        zoom = 3.0f
         panX = 0f
         panY = 0f
+        lastFrameTimeNs = 0L
     }
 
     @Synchronized
@@ -135,6 +152,40 @@ class GLPointRenderer : GLSurfaceView.Renderer {
 
     override fun onDrawFrame(unused: GL10?) {
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT or GLES20.GL_DEPTH_BUFFER_BIT)
+
+        // Interpolate rotation and zoom towards target values (interpolation decay)
+        val now = System.nanoTime()
+        val dt = if (lastFrameTimeNs == 0L) 0.016f else (now - lastFrameTimeNs) / 1_000_000_000f
+        lastFrameTimeNs = now
+
+        val decay = 12f // Damping factor matching model-viewer's default style feel
+        val factor = (1.0f - Math.exp((-decay * dt).toDouble())).toFloat()
+
+        val diffX = targetAngleX - angleX
+        val diffY = targetAngleY - angleY
+        val diffZ = targetAngleZ - angleZ
+        val diffZoom = targetZoom - zoom
+
+        val threshold = 0.01f
+        val zoomThreshold = 0.01f
+        val isAnimatingX = Math.abs(diffX) > threshold
+        val isAnimatingY = Math.abs(diffY) > threshold
+        val isAnimatingZ = Math.abs(diffZ) > threshold
+        val isAnimatingZoom = Math.abs(diffZoom) > zoomThreshold
+
+        if (isAnimatingX || isAnimatingY || isAnimatingZ || isAnimatingZoom) {
+            angleX += diffX * factor
+            angleY += diffY * factor
+            angleZ += diffZ * factor
+            zoom += diffZoom * factor
+            requestRenderListener?.invoke()
+        } else {
+            angleX = targetAngleX
+            angleY = targetAngleY
+            angleZ = targetAngleZ
+            zoom = targetZoom
+            lastFrameTimeNs = 0L
+        }
 
         // Camera setup
         Matrix.setLookAtM(vMatrix, 0, 0f, 0f, zoom, 0f, 0f, 0f, 0f, 1f, 0f)

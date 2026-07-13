@@ -80,9 +80,9 @@ class InteractiveGLView(context: Context, val renderer: GLPointRenderer) : GLSur
 
     private val scaleDetector = ScaleGestureDetector(context, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
         override fun onScale(detector: ScaleGestureDetector): Boolean {
-            renderer.zoom /= detector.scaleFactor
-            if (renderer.zoom < 1.0f) renderer.zoom = 1.0f
-            if (renderer.zoom > 10.0f) renderer.zoom = 10.0f
+            renderer.targetZoom /= detector.scaleFactor
+            if (renderer.targetZoom < 1.0f) renderer.targetZoom = 1.0f
+            if (renderer.targetZoom > 10.0f) renderer.targetZoom = 10.0f
             requestRender()
             return true
         }
@@ -92,6 +92,7 @@ class InteractiveGLView(context: Context, val renderer: GLPointRenderer) : GLSur
         setEGLContextClientVersion(2)
         setRenderer(renderer)
         renderMode = RENDERMODE_WHEN_DIRTY
+        renderer.requestRenderListener = { requestRender() }
     }
 
     private var isPanning = false
@@ -125,7 +126,7 @@ class InteractiveGLView(context: Context, val renderer: GLPointRenderer) : GLSur
                         if (deltaAngle < -180f) deltaAngle += 360f
                         if (deltaAngle > 180f) deltaAngle -= 360f
 
-                        renderer.angleZ += deltaAngle
+                        renderer.targetAngleZ += deltaAngle
                         previousTwoFingerAngle = currentAngle
                         requestRender()
                     }
@@ -155,8 +156,8 @@ class InteractiveGLView(context: Context, val renderer: GLPointRenderer) : GLSur
                         val dx = x - previousX
                         val dy = y - previousY
 
-                        renderer.angleX += dx * 0.15f
-                        renderer.angleY += dy * 0.15f
+                        renderer.targetAngleX += dx * 0.15f
+                        renderer.targetAngleY += dy * 0.15f
                         requestRender()
                     }
                     previousX = x
