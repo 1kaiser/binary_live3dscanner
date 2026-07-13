@@ -164,7 +164,7 @@ class InteractiveGLView(context: Context, val renderer: GLPointRenderer) : GLSur
                         val dist = Math.sqrt((dx * dx + dy * dy).toDouble()).toFloat()
                         if (dist > 0.01f) {
                             val angle = dist * 0.15f // Drag sensitivity gain
-                            val axisX = dy / dist
+                            val axisX = -dy / dist
                             val axisY = dx / dist
 
                             // Create delta rotation around screen-space axis
