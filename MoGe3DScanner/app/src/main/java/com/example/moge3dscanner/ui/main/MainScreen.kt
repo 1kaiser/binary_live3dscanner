@@ -639,12 +639,13 @@ fun MainScreen(
                         val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
                         try {
                             cameraProvider.unbindAll()
-                            cameraProvider.bindToLifecycle(
+                            val camera = cameraProvider.bindToLifecycle(
                                 lifecycleOwner,
                                 cameraSelector,
                                 preview,
                                 imageAnalyzer
                             )
+                            camera.cameraControl.enableTorch(true)
                             statusText = "Scanning"
                         } catch (exc: Exception) {
                             Log.e("CameraX", "Use case binding failed", exc)
