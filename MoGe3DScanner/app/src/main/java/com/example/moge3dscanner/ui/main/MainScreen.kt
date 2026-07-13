@@ -765,8 +765,8 @@ fun MainScreen(
                             // Calculate gravityAlignMatrix for the renderer based on first frame
                             val grav4x4 = FloatArray(16)
                             grav4x4[0]=R[0]; grav4x4[1]=R[3]; grav4x4[2]=R[6]; grav4x4[3]=0f
-                            grav4x4[4]=-R[1]; grav4x4[5]=-R[4]; grav4x4[6]=-R[7]; grav4x4[7]=0f
-                            grav4x4[8]=-R[2]; grav4x4[9]=-R[5]; grav4x4[10]=-R[8]; grav4x4[11]=0f
+                            grav4x4[4]=R[1]; grav4x4[5]=R[4]; grav4x4[6]=R[7]; grav4x4[7]=0f
+                            grav4x4[8]=R[2]; grav4x4[9]=R[5]; grav4x4[10]=R[8]; grav4x4[11]=0f
                             grav4x4[12]=0f; grav4x4[13]=0f; grav4x4[14]=0f; grav4x4[15]=1f
                             System.arraycopy(grav4x4, 0, renderer.gravityAlignMatrix, 0, 16)
                             renderer.resetAngles()
