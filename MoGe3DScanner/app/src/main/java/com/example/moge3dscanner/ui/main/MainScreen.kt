@@ -561,88 +561,82 @@ fun MainScreen(
                                 analyzer.setAnalyzer(cameraExecutor) { imageProxy ->
                                     try {
                                         if (isContinuousScanning || shouldTakeSnapshot.compareAndSet(true, false)) {
-                                            val model = interpreter
-                                            if (model != null) {
-                                                Log.d("Analyzer", "Running inference: setting isProcessingFrame = true")
-                                                Handler(Looper.getMainLooper()).post {
-                                                    isProcessingFrame = true
-                                                }
-                                                
-                                                val width = imageProxy.width
-                                                val height = imageProxy.height
-                                                val plane = imageProxy.planes[0]
-                                                val buffer = plane.buffer
-                                                
-                                                val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-                                                bitmap.copyPixelsFromBuffer(buffer)
-                                                
-                                                val rotation = imageProxy.imageInfo.rotationDegrees
-                                                val rotatedBitmap = if (rotation != 0) {
-                                                    val matrix = android.graphics.Matrix().apply { postRotate(rotation.toFloat()) }
-                                                    Bitmap.createBitmap(bitmap, 0, 0, width, height, matrix, true)
-                                                } else {
-                                                    bitmap
-                                                }
-                                                
-                                                val result = model.runInference(rotatedBitmap, stride = 4)
-                                                if (result != null) {
-                                                    val positions = result.first
-                                                    val colors = result.second
-                                                    val numPoints = positions.size / 3
-                                                    val glPositions = FloatArray(positions.size)
+                                             val width = imageProxy.width
+                                             val height = imageProxy.height
+                                             val plane = imageProxy.planes[0]
+                                             val buffer = plane.buffer
+                                             
+                                             val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+                                             bitmap.copyPixelsFromBuffer(buffer)
+                                             
+                                             val rotation = imageProxy.imageInfo.rotationDegrees
+                                             val rotatedBitmap = if (rotation != 0) {
+                                                 val matrix = android.graphics.Matrix().apply { postRotate(rotation.toFloat()) }
+                                                 Bitmap.createBitmap(bitmap, 0, 0, width, height, matrix, true)
+                                             } else {
+                                                 bitmap
+                                             }
 
-                                                    // Convert MoGe camera-space → OpenGL camera-space:
-                                                    //   MoGe:  X=right  Y=down   Z=into scene
-                                                    //   OpenGL: X=right  Y=up    Z=toward viewer
-                                                    // Gravity alignment happens once in the renderer
-                                                    // via gravityAlignMatrix — not here.
-                                                    for (j in 0 until numPoints) {
-                                                        glPositions[j * 3]     =  positions[j * 3]       // X: right → right
-                                                        glPositions[j * 3 + 1] = -positions[j * 3 + 1]  // Y: down  → up
-                                                        glPositions[j * 3 + 2] = -positions[j * 3 + 2]  // Z: into  → toward viewer
-                                                    }
+                                             val R_i = synchronized(captureRotationMatrix) { captureRotationMatrix.clone() }
+                                             val R_0 = synchronized(firstFrameRotationMatrix) { firstFrameRotationMatrix.clone() }
+                                             val R_0_T = transpose3x3(R_0)
+                                             val R_rel = multiply3x3(R_0_T, R_i)
 
-                                                    val R_i = synchronized(captureRotationMatrix) { captureRotationMatrix.clone() }
-                                                    val R_0 = synchronized(firstFrameRotationMatrix) { firstFrameRotationMatrix.clone() }
-                                                    val R_0_T = transpose3x3(R_0)
-                                                    val R_rel = multiply3x3(R_0_T, R_i)
-
-                                                    if (isMultiModeSnapshot.get()) {
-                                                        for (j in 0 until numPoints) {
-                                                            rotatePoint3x3(glPositions, j * 3, R_rel)
-                                                        }
-                                                    }
-
-                                                    // Save dataset frame if recording mode is active
-                                                    if (isRecordDatasetModeActive.get()) {
-                                                        val dir = currentDatasetDirRef.get()
-                                                        if (dir != null) {
-                                                            val frameIndex = datasetFrameCountRef.getAndIncrement()
-                                                            saveDatasetFrame(context, dir, frameIndex, rotatedBitmap, positions, R_rel)
-                                                            writeStateFile(dir, frameIndex + 1, 518, 518)
-                                                        }
-                                                    }
-
-                                                    val accumulate = isContinuousScanning || isMultiModeSnapshot.get()
-                                                    accumulator.addFrame(glPositions, colors, accumulate)
-                                                    val (mergedPositions, mergedColors) = accumulator.getPositionsAndColors()
-                                                    
-                                                    Handler(Looper.getMainLooper()).post {
-                                                        lastPositions = mergedPositions
-                                                        lastColors = mergedColors
-                                                        renderer.updatePoints(mergedPositions, mergedColors)
-                                                    }
-                                                }
-                                                Log.d("Analyzer", "Finished inference: setting isProcessingFrame = false")
-                                                Handler(Looper.getMainLooper()).post {
-                                                    isProcessingFrame = false
-                                                }
-                                            } else {
-                                                Log.d("Analyzer", "Model null: setting isProcessingFrame = false")
-                                                Handler(Looper.getMainLooper()).post {
-                                                    isProcessingFrame = false
-                                                }
-                                            }
+                                             if (isRecordDatasetModeActive.get()) {
+                                                 // Skip inference completely when recording dataset, write empty .pcl (0 points)
+                                                 val dir = currentDatasetDirRef.get()
+                                                 if (dir != null) {
+                                                     val frameIndex = datasetFrameCountRef.getAndIncrement()
+                                                     saveDatasetFrame(context, dir, frameIndex, rotatedBitmap, FloatArray(0), R_rel)
+                                                     writeStateFile(dir, frameIndex + 1, 518, 518)
+                                                 }
+                                                 Handler(Looper.getMainLooper()).post {
+                                                     isProcessingFrame = false
+                                                 }
+                                             } else {
+                                                 // Normal scanning mode: run inference
+                                                 val model = interpreter
+                                                 if (model != null) {
+                                                     Log.d("Analyzer", "Running inference: setting isProcessingFrame = true")
+                                                     Handler(Looper.getMainLooper()).post {
+                                                         isProcessingFrame = true
+                                                     }
+                                                     val result = model.runInference(rotatedBitmap, stride = 4)
+                                                     if (result != null) {
+                                                         val positions = result.first
+                                                         val colors = result.second
+                                                         val numPoints = positions.size / 3
+                                                         val glPositions = FloatArray(positions.size)
+                                                         for (j in 0 until numPoints) {
+                                                             glPositions[j * 3]     =  positions[j * 3]       // X: right → right
+                                                             glPositions[j * 3 + 1] = -positions[j * 3 + 1]  // Y: down  → up
+                                                             glPositions[j * 3 + 2] = -positions[j * 3 + 2]  // Z: into  → toward viewer
+                                                         }
+                                                         if (isMultiModeSnapshot.get()) {
+                                                             for (j in 0 until numPoints) {
+                                                                 rotatePoint3x3(glPositions, j * 3, R_rel)
+                                                             }
+                                                         }
+                                                         val accumulate = isContinuousScanning || isMultiModeSnapshot.get()
+                                                         accumulator.addFrame(glPositions, colors, accumulate)
+                                                         val (mergedPositions, mergedColors) = accumulator.getPositionsAndColors()
+                                                         Handler(Looper.getMainLooper()).post {
+                                                             lastPositions = mergedPositions
+                                                             lastColors = mergedColors
+                                                             renderer.updatePoints(mergedPositions, mergedColors)
+                                                         }
+                                                     }
+                                                     Log.d("Analyzer", "Finished inference: setting isProcessingFrame = false")
+                                                     Handler(Looper.getMainLooper()).post {
+                                                         isProcessingFrame = false
+                                                     }
+                                                 } else {
+                                                     Log.d("Analyzer", "Model null: setting isProcessingFrame = false")
+                                                     Handler(Looper.getMainLooper()).post {
+                                                         isProcessingFrame = false
+                                                     }
+                                                 }
+                                             }
                                         } else {
                                             Handler(Looper.getMainLooper()).post {
                                                 isProcessingFrame = false
