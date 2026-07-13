@@ -54,24 +54,22 @@ class GLPointRenderer : GLSurfaceView.Renderer {
     var onNewPointsListener: (() -> Unit)? = null
 
     // Touch interaction values (current interpolated state)
-    var angleX: Float = 0f
-    var angleY: Float = 0f
-    var angleZ: Float = 0f
     var zoom: Float = 3.0f
     var panX: Float = 0f
     var panY: Float = 0f
 
     // Target values to interpolate towards (Space Opera/model-viewer style controls)
-    var targetAngleX: Float = 0f
-    var targetAngleY: Float = 0f
-    var targetAngleZ: Float = 0f
     var targetZoom: Float = 3.0f
     var targetPanX: Float = 0f
     var targetPanY: Float = 0f
 
-    // Velocity momentum (flick-to-spin)
-    var spinVelocityX: Float = 0f
-    var spinVelocityY: Float = 0f
+    // Cumulative screen-space trackball/arcball rotation matrix
+    val userRotationMatrix = FloatArray(16).also { Matrix.setIdentityM(it, 0) }
+
+    // Velocity momentum (flick-to-spin) for trackball
+    var spinVelocity: Float = 0f
+    var spinAxisX: Float = 0f
+    var spinAxisY: Float = 0f
     var isTouching: Boolean = false
 
     // Gravity-aligned base orientation captured at scan time (4x4 column-major)
@@ -83,20 +81,16 @@ class GLPointRenderer : GLSurfaceView.Renderer {
 
     /** Resets user-applied rotation and pan back to the gravity-aligned default. */
     fun resetAngles() {
-        targetAngleX = 0f
-        targetAngleY = 0f
-        targetAngleZ = 0f
+        Matrix.setIdentityM(userRotationMatrix, 0)
         targetZoom = 3.0f
         targetPanX = 0f
         targetPanY = 0f
-        angleX = 0f
-        angleY = 0f
-        angleZ = 0f
         zoom = 3.0f
         panX = 0f
         panY = 0f
-        spinVelocityX = 0f
-        spinVelocityY = 0f
+        spinVelocity = 0f
+        spinAxisX = 0f
+        spinAxisY = 0f
         isTouching = false
         lastFrameTimeNs = 0L
     }
@@ -173,48 +167,42 @@ class GLPointRenderer : GLSurfaceView.Renderer {
         val factor = (1.0f - Math.exp((-decay * dt).toDouble())).toFloat()
 
         // Apply momentum (flick-to-spin) when user is not touching the screen
-        if (!isTouching) {
+        // Apply momentum (flick-to-spin) for trackball when user is not touching the screen
+        if (!isTouching && spinVelocity > 0f) {
             val frictionDecay = 4.0f
             val frictionFactor = Math.exp((-frictionDecay * dt).toDouble()).toFloat()
-            spinVelocityX *= frictionFactor
-            spinVelocityY *= frictionFactor
 
-            if (Math.abs(spinVelocityX) < 0.02f) spinVelocityX = 0f
-            if (Math.abs(spinVelocityY) < 0.02f) spinVelocityY = 0f
+            // Apply incremental rotation for this frame
+            val deltaRot = FloatArray(16)
+            Matrix.setIdentityM(deltaRot, 0)
+            Matrix.rotateM(deltaRot, 0, spinVelocity * dt * 60f, spinAxisX, spinAxisY, 0f)
 
-            targetAngleX += spinVelocityX
-            targetAngleY += spinVelocityY
+            val temp = FloatArray(16)
+            Matrix.multiplyMM(temp, 0, deltaRot, 0, userRotationMatrix, 0)
+            System.arraycopy(temp, 0, userRotationMatrix, 0, 16)
+
+            spinVelocity *= frictionFactor
+            if (spinVelocity < 0.05f) {
+                spinVelocity = 0f
+            }
         }
 
-        val diffX = targetAngleX - angleX
-        val diffY = targetAngleY - angleY
-        val diffZ = targetAngleZ - angleZ
         val diffZoom = targetZoom - zoom
         val diffPanX = targetPanX - panX
         val diffPanY = targetPanY - panY
 
-        val threshold = 0.01f
         val zoomThreshold = 0.01f
         val panThreshold = 0.001f
-        val isAnimatingX = Math.abs(diffX) > threshold
-        val isAnimatingY = Math.abs(diffY) > threshold
-        val isAnimatingZ = Math.abs(diffZ) > threshold
         val isAnimatingZoom = Math.abs(diffZoom) > zoomThreshold
         val isAnimatingPan = Math.abs(diffPanX) > panThreshold || Math.abs(diffPanY) > panThreshold
-        val isAnimatingVelocity = spinVelocityX != 0f || spinVelocityY != 0f
+        val isAnimatingVelocity = spinVelocity > 0f
 
-        if (isAnimatingX || isAnimatingY || isAnimatingZ || isAnimatingZoom || isAnimatingPan || isAnimatingVelocity) {
-            angleX += diffX * factor
-            angleY += diffY * factor
-            angleZ += diffZ * factor
+        if (isAnimatingZoom || isAnimatingPan || isAnimatingVelocity) {
             zoom += diffZoom * factor
             panX += diffPanX * factor
             panY += diffPanY * factor
             requestRenderListener?.invoke()
         } else {
-            angleX = targetAngleX
-            angleY = targetAngleY
-            angleZ = targetAngleZ
             zoom = targetZoom
             panX = targetPanX
             panY = targetPanY
@@ -236,17 +224,8 @@ class GLPointRenderer : GLSurfaceView.Renderer {
         Matrix.multiplyMM(gravModel, 0, gravityAlignMatrix, 0, translateM, 0)
 
         // Step 3: apply user rotation in WORLD space as a left-multiply.
-        // This guarantees horizontal drag (angleX) ALWAYS spins around world-Y,
-        // and vertical drag (angleY) ALWAYS tilts around world-X,
-        // regardless of how gravityAlignMatrix has oriented the cloud.
-        val userRot = FloatArray(16)
-        Matrix.setIdentityM(userRot, 0)
-        Matrix.rotateM(userRot, 0, angleY, 1f, 0f, 0f)  // tilt up/down:   world X (applied last, locks to screen-horizontal)
-        Matrix.rotateM(userRot, 0, angleX, 0f, 1f, 0f)  // spin left/right: world Y (applied first)
-        Matrix.rotateM(userRot, 0, angleZ, 0f, 0f, 1f)  // roll:            world Z
-
         val modelMatrix = FloatArray(16)
-        Matrix.multiplyMM(modelMatrix, 0, userRot, 0, gravModel, 0)
+        Matrix.multiplyMM(modelMatrix, 0, userRotationMatrix, 0, gravModel, 0)
 
         // MVP = Proj * View * Model
         val scratch = FloatArray(16)

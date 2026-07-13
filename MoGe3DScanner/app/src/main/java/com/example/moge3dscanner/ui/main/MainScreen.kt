@@ -117,6 +117,7 @@ class InteractiveGLView(context: Context, val renderer: GLPointRenderer) : GLSur
                     isPanning = true
                     previousMidX = midX
                     previousMidY = midY
+                    renderer.spinVelocity = 0f
                 }
                 MotionEvent.ACTION_MOVE -> {
                     if (isPanning) {
@@ -153,19 +154,35 @@ class InteractiveGLView(context: Context, val renderer: GLPointRenderer) : GLSur
                     previousY = y
                     isPanning = false
                     renderer.isTouching = true
-                    renderer.spinVelocityX = 0f
-                    renderer.spinVelocityY = 0f
+                    renderer.spinVelocity = 0f
                 }
                 MotionEvent.ACTION_MOVE -> {
                     if (!isPanning) {
                         val dx = x - previousX
                         val dy = y - previousY
 
-                        renderer.targetAngleX += dx * 0.15f
-                        renderer.targetAngleY += dy * 0.15f
-                        renderer.spinVelocityX = dx * 0.15f
-                        renderer.spinVelocityY = dy * 0.15f
-                        requestRender()
+                        val dist = Math.sqrt((dx * dx + dy * dy).toDouble()).toFloat()
+                        if (dist > 0.01f) {
+                            val angle = dist * 0.15f // Drag sensitivity gain
+                            val axisX = dy / dist
+                            val axisY = dx / dist
+
+                            // Create delta rotation around screen-space axis
+                            val deltaRot = FloatArray(16)
+                            Matrix.setIdentityM(deltaRot, 0)
+                            Matrix.rotateM(deltaRot, 0, angle, axisX, axisY, 0f)
+
+                            // Multiply on the left of cumulative user rotation
+                            val temp = FloatArray(16)
+                            Matrix.multiplyMM(temp, 0, deltaRot, 0, renderer.userRotationMatrix, 0)
+                            System.arraycopy(temp, 0, renderer.userRotationMatrix, 0, 16)
+
+                            // Set roll velocity & axis for momentum glide
+                            renderer.spinVelocity = angle
+                            renderer.spinAxisX = axisX
+                            renderer.spinAxisY = axisY
+                            requestRender()
+                        }
                     }
                     previousX = x
                     previousY = y
