@@ -72,6 +72,7 @@ import android.location.LocationManager
 import android.os.Bundle
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import android.graphics.Bitmap as AndroidBitmap
 
 class InteractiveGLView(context: Context, val renderer: GLPointRenderer) : GLSurfaceView(context) {
     private var previousX: Float = 0f
@@ -244,6 +245,10 @@ fun MainScreen(
     var isFlashlightOn by remember { mutableStateOf(false) }
     var cameraInstance by remember { mutableStateOf<androidx.camera.core.Camera?>(null) }
 
+    val thermalManager = remember { ThermalCameraManager(context) }
+    var isThermalEnabled by remember { mutableStateOf(false) }
+    var lastThermalBitmap by remember { mutableStateOf<AndroidBitmap?>(null) }
+
     LaunchedEffect(isFlashlightOn) {
         cameraInstance?.cameraControl?.enableTorch(isFlashlightOn)
     }
@@ -375,6 +380,7 @@ fun MainScreen(
             cameraExecutor.shutdown()
             currentInterpreter?.close()
             sensorManager.unregisterListener(sensorListener)
+            thermalManager.stopStreaming()
         }
     }
 
@@ -496,6 +502,34 @@ fun MainScreen(
                     }
                 )
             }
+            // Row 3: Thermal Snap
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(top = 2.dp)
+            ) {
+                val thermalLabel = when {
+                    isThermalEnabled && thermalManager.isStreaming() -> "✓  Thermal Snap"
+                    isThermalEnabled && !thermalManager.isSdkAvailable() -> "✗  Thermal N/A"
+                    else -> "☐  Thermal Snap"
+                }
+                Text(
+                    text = thermalLabel,
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 9.sp,
+                    color = when {
+                        isThermalEnabled && thermalManager.isStreaming() -> Color(0xFF4CAF50)
+                        isThermalEnabled && !thermalManager.isSdkAvailable() -> Color(0xFFE53935)
+                        else -> Color(0xFF956820)
+                    },
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.clickable {
+                        isThermalEnabled = !isThermalEnabled
+                        if (isThermalEnabled) thermalManager.startStreaming()
+                        else { thermalManager.stopStreaming(); lastThermalBitmap = null }
+                    }
+                )
+            }
         }
 
         // 3. Play/Pause Continuous Scanning Mode (top-right overlay)
@@ -601,7 +635,14 @@ fun MainScreen(
                                                      Handler(Looper.getMainLooper()).post {
                                                          isProcessingFrame = true
                                                      }
-                                                     val result = model.runInference(rotatedBitmap, stride = 4)
+                                                     // Use thermal frame as color source if available
+                                                     val thermalBmp = if (isThermalEnabled) lastThermalBitmap else null
+                                                     val colorBitmap = if (thermalBmp != null) {
+                                                         Bitmap.createScaledBitmap(thermalBmp, rotatedBitmap.width, rotatedBitmap.height, true)
+                                                     } else {
+                                                         rotatedBitmap
+                                                     }
+                                                     val result = model.runInferenceWithColor(rotatedBitmap, colorBitmap, stride = 4)
                                                      if (result != null) {
                                                          val positions = result.first
                                                          val colors = result.second
@@ -869,7 +910,12 @@ fun MainScreen(
                             }
                         }
 
-                        // 2. Trigger new snapshot
+                        // 2. Capture thermal frame if enabled
+                        if (isThermalEnabled) {
+                            lastThermalBitmap = thermalManager.captureFrame()
+                        }
+
+                        // 3. Trigger new snapshot
                         shouldTakeSnapshot.set(true)
                         isProcessingFrame = true
 

@@ -71,30 +71,30 @@ class MogeInterpreter(private val context: Context) {
     }
 
     @Synchronized
-    fun runInference(bitmap: Bitmap, stride: Int): Pair<FloatArray, FloatArray>? {
-        val interp = interpreter ?: return null
-        
-        // 1. Resize and extract pixel values
-        val scaledBitmap = Bitmap.createScaledBitmap(bitmap, 518, 518, true)
-        scaledBitmap.getPixels(pixels, 0, 518, 0, 0, 518, 518)
+    fun runInference(bitmap: Bitmap, stride: Int): Pair<FloatArray, FloatArray>? =
+        runInferenceWithColor(bitmap, bitmap, stride)
 
-        // 2. Preprocess: Normalize colors to [0, 1]
+    @Synchronized
+    fun runInferenceWithColor(depthBitmap: Bitmap, colorBitmap: Bitmap, stride: Int): Pair<FloatArray, FloatArray>? {
+        val interp = interpreter ?: return null
+
+        // 1. Resize depth bitmap and extract pixels for model input
+        val scaledDepth = Bitmap.createScaledBitmap(depthBitmap, 518, 518, true)
+        scaledDepth.getPixels(pixels, 0, 518, 0, 0, 518, 518)
+
+        // 2. Preprocess depth input: normalize to [0, 1]
         inputFloatBuffer.rewind()
         for (i in pixels.indices) {
             val pixel = pixels[i]
-            val r = ((pixel shr 16) and 0xFF) / 255.0f
-            val g = ((pixel shr 8) and 0xFF) / 255.0f
-            val b = (pixel and 0xFF) / 255.0f
-            inputFloatBuffer.put(r)
-            inputFloatBuffer.put(g)
-            inputFloatBuffer.put(b)
+            inputFloatBuffer.put(((pixel shr 16) and 0xFF) / 255.0f)
+            inputFloatBuffer.put(((pixel shr 8) and 0xFF) / 255.0f)
+            inputFloatBuffer.put((pixel and 0xFF) / 255.0f)
         }
 
-        // 3. Run model
+        // 3. Run depth model
         val inputs = arrayOf<Any>(inputBuffer)
         val outputs = mutableMapOf<Int, Any>()
-        val dummyOutput = FloatArray(1)
-        outputs[0] = dummyOutput
+        outputs[0] = FloatArray(1)
         outputs[1] = outputBuffer
 
         inputBuffer.rewind()
@@ -102,7 +102,17 @@ class MogeInterpreter(private val context: Context) {
         outputFloatBuffer.rewind()
         interp.runForMultipleInputsOutputs(inputs, outputs)
 
-        // 4. Subsample the output points and match colors
+        // 4. Resize color bitmap separately (may differ from depth source)
+        val colorPixels: IntArray
+        if (colorBitmap === depthBitmap) {
+            colorPixels = pixels
+        } else {
+            val scaledColor = Bitmap.createScaledBitmap(colorBitmap, 518, 518, true)
+            colorPixels = IntArray(518 * 518)
+            scaledColor.getPixels(colorPixels, 0, 518, 0, 0, 518, 518)
+        }
+
+        // 5. Subsample output points
         val step = stride
         val stepsX = (518 + step - 1) / step
         val size = stepsX * stepsX
@@ -113,14 +123,13 @@ class MogeInterpreter(private val context: Context) {
         for (y in 0 until 518 step step) {
             for (x in 0 until 518 step step) {
                 val i = y * 518 + x
-                // MoGe outputs points coordinates: (x, y, z)
-                positions[idx * 3] = outputFloatBuffer.get(i * 3)
+                positions[idx * 3]     = outputFloatBuffer.get(i * 3)
                 positions[idx * 3 + 1] = outputFloatBuffer.get(i * 3 + 1)
                 positions[idx * 3 + 2] = outputFloatBuffer.get(i * 3 + 2)
 
-                val pixel = pixels[i]
-                colors[idx * 3] = ((pixel shr 16) and 0xFF) / 255.0f
-                colors[idx * 3 + 1] = ((pixel shr 8) and 0xFF) / 255.0f
+                val pixel = colorPixels[i]
+                colors[idx * 3]     = ((pixel shr 16) and 0xFF) / 255.0f
+                colors[idx * 3 + 1] = ((pixel shr 8)  and 0xFF) / 255.0f
                 colors[idx * 3 + 2] = (pixel and 0xFF) / 255.0f
                 idx++
             }
