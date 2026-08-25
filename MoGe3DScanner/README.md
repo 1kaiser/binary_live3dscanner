@@ -6,17 +6,24 @@
 
 <p align="center">
   <a href="https://antigravity.google/press">
-    <img src="assets/antigravity_logo.svg" alt="Google Antigravity Logo" width="80" height="80" />
+    <img src="assets/antigravity_logo.svg" alt="Google Antigravity Logo" width="72" height="72" />
   </a>
-  <br>
+  &nbsp;&nbsp;&nbsp;&nbsp;
+  <a href="https://developer.android.com/tools">
+    <img src="assets/android_cli_logo.svg" alt="Android CLI Logo" width="72" height="72" />
+  </a>
+  <br><br>
   <img src="https://img.shields.io/badge/Gemini%203.7-Google%20DeepMind-4285F4?style=for-the-badge&logo=google&logoColor=white" alt="Gemini 3.7" />
   <a href="https://antigravity.google/press">
     <img src="https://img.shields.io/badge/Google%20Antigravity-v2.0%20Advanced%20Agentic%20Coding-7C4DFF?style=for-the-badge&logo=googlecloud&logoColor=white" alt="Google Antigravity" />
   </a>
-  <img src="https://img.shields.io/badge/Android-USB%20Host%20UVC-3DDC84?style=for-the-badge&logo=android&logoColor=white" alt="Android UVC" />
+  <a href="https://developer.android.com/tools">
+    <img src="https://img.shields.io/badge/Android%20CLI-Command--Line%20Tools%20v11.0-3DDC84?style=for-the-badge&logo=android&logoColor=white" alt="Android CLI" />
+  </a>
+  <img src="https://img.shields.io/badge/USB%20Host-UVC%20Thermal%20Radiometry-FF6F00?style=for-the-badge&logo=usb&logoColor=white" alt="USB Thermal" />
 </p>
 
-A self-contained Android application that performs live 3D reconstruction from single-camera RGB images and radiometric thermal cameras in real-time, utilizing the **MoGe** monocular geometry model running entirely on-device. Crafted with **Gemini 3.7** and **[Google Antigravity](https://antigravity.google/press)**.
+A self-contained Android application that performs live 3D reconstruction from single-camera RGB images and radiometric thermal cameras in real-time, utilizing the **MoGe** monocular geometry model running entirely on-device. Crafted with **Gemini 3.7**, **[Google Antigravity](https://antigravity.google/press)**, and the official **[Android CLI](https://developer.android.com/tools)** tools.
 
 ---
 
@@ -27,6 +34,7 @@ A self-contained Android application that performs live 3D reconstruction from s
 
 2. **Thermal Radiometry & Celsius (°C) Integration**:
    - Seamlessly connects to UVC thermal cameras (HT-203U, InfiRay T2/T3, HIKMICRO `VID:0x2bdf PID:0x0102`) using the standard Android USB Host API.
+   - Strict `formatIndex == 1` (`YUY2` 16-bit uncompressed) descriptor negotiation ensuring raw 16-bit microbolometer data ($49,152$ uint16s).
    - Real-time Celsius temperature computation with min/max/center spot tracking.
    - 8-anchor false-color **Ironbow** colormap palette.
    - $90^\circ$ clockwise upright portrait rotation to match the phone's native camera orientation.
@@ -76,23 +84,26 @@ A self-contained Android application that performs live 3D reconstruction from s
 
 ---
 
-## ⚙️ Compilation & Deployment
+## ⚙️ Android CLI Build & Deployment
+
+Using the official **[Android Command-Line Tools (CLI)](https://developer.android.com/tools)**:
 
 ```bash
-# 1. Build debug APK
+# 1. Build debug APK via Gradle
 ./gradlew assembleDebug
 
-# 2. Check presence and install over Wireless ADB
+# 2. Wireless ADB Connection & Clean Installation
+adb connect <PHONE_IP>:<PORT>
 PKG=$(adb shell pm list packages com.example.moge3dscanner | grep moge || true)
 if [ -n "$PKG" ]; then
     adb uninstall com.example.moge3dscanner
 fi
 adb install -t -g app/build/outputs/apk/debug/app-debug.apk
+
+# 3. Grant Runtime Permissions & Launch
 adb shell pm grant com.example.moge3dscanner android.permission.CAMERA
 adb shell pm grant com.example.moge3dscanner android.permission.ACCESS_FINE_LOCATION
 adb shell pm grant com.example.moge3dscanner android.permission.ACCESS_COARSE_LOCATION
-
-# 3. Launch
 adb shell am start -n com.example.moge3dscanner/.MainActivity
 ```
 
@@ -103,6 +114,10 @@ adb shell am start -n com.example.moge3dscanner/.MainActivity
 * **Google DeepMind & Gemini**:
   * *Gemini 3.7*: [https://blog.google/technology/google-deepmind/gemini-model-updates-february-2025/](https://blog.google/technology/google-deepmind/gemini-model-updates-february-2025/)
   * *Google Antigravity*: [https://antigravity.google/press](https://antigravity.google/press)
+
+* **Android Developer Tools**:
+  * *Android CLI & Command Line Tools*: [https://developer.android.com/tools](https://developer.android.com/tools)
+  * *Android SDK Platform Tools*: [https://developer.android.com/studio/releases/platform-tools](https://developer.android.com/studio/releases/platform-tools)
 
 * **MoGe v1 & v2 Models**:
   State-of-the-art monocular geometry estimation by Microsoft Research.
