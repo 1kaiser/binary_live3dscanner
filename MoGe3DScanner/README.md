@@ -1,31 +1,34 @@
 # MoGe3DScanner - Native Live 3D & Thermal Scanner
 
-<p align="center">
-  <img src="https://storage.googleapis.com/gweb-uniblog-publish-prod/images/gemini-3-7-flash.width-1600.format-webp.webp" alt="Gemini 3.7 Flash" width="100%" />
-</p>
-
-<p align="center">
-  <a href="https://developer.android.com/blog/posts/android-cli-build-android-apps-3x-faster-using-any-agent">
-    <img src="https://developer.android.com/static/blog/assets/hours_CLI_Dark_Strapi_2x_427f20cc78_nX0qd.webp" alt="Android CLI: Build Android apps 3x faster using any agent" width="100%" />
-  </a>
-</p>
+<table align="center" width="100%">
+  <tr>
+    <td width="50%" align="center" valign="middle">
+      <a href="https://blog.google/technology/google-deepmind/gemini-model-updates-february-2025/">
+        <img src="assets/gemini_3_7_flash.png" alt="Gemini 3.7 Flash" width="100%" />
+      </a>
+    </td>
+    <td width="50%" align="center" valign="middle">
+      <a href="https://developer.android.com/blog/posts/android-cli-build-android-apps-3x-faster-using-any-agent">
+        <img src="assets/android_cli_banner.png" alt="Android CLI: Build Android apps 3x faster using any agent" width="100%" />
+      </a>
+    </td>
+  </tr>
+</table>
 
 <p align="center">
   <a href="https://antigravity.google/press">
-    <img src="assets/antigravity_product_lockup_full_color.png" alt="Google Antigravity Lockup - Full Color" height="52" />
+    <img src="assets/antigravity_product_lockup_full_color.png" alt="Google Antigravity Lockup" height="38" />
   </a>
-  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
   <a href="https://developer.android.com/blog/posts/android-cli-build-android-apps-3x-faster-using-any-agent">
-    <img src="assets/android_cli_logo.svg" alt="Android CLI Logo" height="52" />
+    <img src="assets/android_lockup.svg" alt="Android CLI Lockup" height="38" />
   </a>
-  <br><br>
-  <img src="https://img.shields.io/badge/Gemini%203.7-Google%20DeepMind-4285F4?style=for-the-badge&logo=google&logoColor=white" alt="Gemini 3.7" />
-  <a href="https://antigravity.google/press">
-    <img src="https://img.shields.io/badge/Google%20Antigravity-v2.0%20Advanced%20Agentic%20Coding-7C4DFF?style=for-the-badge&logo=googlecloud&logoColor=white" alt="Google Antigravity" />
-  </a>
-  <a href="https://developer.android.com/blog/posts/android-cli-build-android-apps-3x-faster-using-any-agent">
-    <img src="https://img.shields.io/badge/Android%20CLI-Official%20Blog-3DDC84?style=for-the-badge&logo=android&logoColor=white" alt="Android CLI" />
-  </a>
+</p>
+
+<p align="center">
+  <a href="https://blog.google/technology/google-deepmind/gemini-model-updates-february-2025/"><img src="https://img.shields.io/badge/Gemini%203.7-Google%20DeepMind-4285F4?style=for-the-badge&logo=google&logoColor=white" alt="Gemini 3.7" /></a>
+  <a href="https://antigravity.google/press"><img src="https://img.shields.io/badge/Google%20Antigravity-v2.0%20Agentic%20Coding-7C4DFF?style=for-the-badge&logo=googlecloud&logoColor=white" alt="Google Antigravity" /></a>
+  <a href="https://developer.android.com/blog/posts/android-cli-build-android-apps-3x-faster-using-any-agent"><img src="https://img.shields.io/badge/Android%20CLI-Official%20Blog-3DDC84?style=for-the-badge&logo=android&logoColor=white" alt="Android CLI" /></a>
   <img src="https://img.shields.io/badge/USB%20Host-UVC%20Thermal%20Radiometry-FF6F00?style=for-the-badge&logo=usb&logoColor=white" alt="USB Thermal" />
 </p>
 
@@ -121,8 +124,7 @@ adb shell am start -n com.example.moge3dscanner/.MainActivity
 
 * **Google DeepMind & Gemini 3.7**:
   * *Gemini 3.7 Release*: [https://blog.google/technology/google-deepmind/gemini-model-updates-february-2025/](https://blog.google/technology/google-deepmind/gemini-model-updates-february-2025/)
-  * *Gemini 3.7 Flash Image*: [https://storage.googleapis.com/gweb-uniblog-publish-prod/images/gemini-3-7-flash.width-1600.format-webp.webp](https://storage.googleapis.com/gweb-uniblog-publish-prod/images/gemini-3-7-flash.width-1600.format-webp.webp)
-  * *Google Antigravity Press Assets & Full Color Lockup*: [https://antigravity.google/press](https://antigravity.google/press)
+  * *Google Antigravity Press Assets*: [https://antigravity.google/press](https://antigravity.google/press)
 
 * **Android Developer Tools & CLI**:
   * *Android CLI Article*: [https://developer.android.com/blog/posts/android-cli-build-android-apps-3x-faster-using-any-agent](https://developer.android.com/blog/posts/android-cli-build-android-apps-3x-faster-using-any-agent)
