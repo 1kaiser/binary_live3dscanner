@@ -317,32 +317,7 @@ class ThermalCameraManager(private val context: Context) {
             }
         }
 
-        // 2) HIKMICRO stacked layout
-        if (w == 256 && h >= 340) {
-            fun chromaFrac(rowStart: Int): Double {
-                var hit = 0; var total = 0
-                var i = w * rowStart
-                val end = i + Xtherm.PIXELS
-                while (i < end) {
-                    if (((frameU16[i].toInt() shr 8) and 0xFF) == 0x80) hit++
-                    total++; i += 101
-                }
-                return hit.toDouble() / total
-            }
-            val f0 = chromaFrac(0)
-            val f1 = chromaFrac(196)
-            val rawRow = when {
-                f0 < 0.2 && f1 > 0.8 -> 0
-                f1 < 0.2 && f0 > 0.8 -> 196
-                else -> -1
-            }
-            if (rawRow >= 0) {
-                renderHikRaw(w * rawRow)
-                return
-            }
-        }
-
-        // 3) Stacked frame: bottom half raw Kelvin*64
+        // 2) Stacked frame: bottom half raw Kelvin*64
         if (h >= 2 * 190) {
             val rows = h / 2
             val bottom = w * rows
@@ -359,8 +334,9 @@ class ThermalCameraManager(private val context: Context) {
             }
         }
 
-        // 4) Direct 256x192 raw mode
-        if (w == 256 && h in 190..200) {
+        // 3) Standard active thermal frame (first 256x192 pixels)
+        // Directly decodes active microbolometer matrix for 256x192, 256x196, 256x344, 256x400
+        if (nU16 >= Xtherm.PIXELS) {
             renderHikRaw(0)
             return
         }

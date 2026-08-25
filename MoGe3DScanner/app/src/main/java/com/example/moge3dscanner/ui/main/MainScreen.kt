@@ -165,6 +165,63 @@ fun FullscreenExitIcon(modifier: Modifier = Modifier, color: Color = Color.White
     }
 }
 
+@Composable
+fun GeminiSparkleLogo(modifier: Modifier = Modifier) {
+    Canvas(modifier = modifier.size(14.dp)) {
+        val w = size.width
+        val h = size.height
+        val cx = w / 2f
+        val cy = h / 2f
+
+        val path = androidx.compose.ui.graphics.Path().apply {
+            moveTo(cx, 0f)
+            cubicTo(cx, cy * 0.45f, cx * 0.55f, cy, 0f, cy)
+            cubicTo(cx * 0.55f, cy, cx, cy * 1.55f, cx, h)
+            cubicTo(cx, cy * 1.55f, cx * 1.45f, cy, w, cy)
+            cubicTo(cx * 1.45f, cy, cx, cy * 0.45f, cx, 0f)
+            close()
+        }
+
+        val brush = androidx.compose.ui.graphics.Brush.linearGradient(
+            colors = listOf(
+                Color(0xFF4285F4), // Google Blue
+                Color(0xFF9B72CB), // Gemini Purple
+                Color(0xFFD96570)  // Coral Red
+            ),
+            start = Offset(0f, 0f),
+            end = Offset(w, h)
+        )
+        drawPath(path, brush)
+    }
+}
+
+@Composable
+fun AntigravityLogo(modifier: Modifier = Modifier) {
+    Canvas(modifier = modifier.size(14.dp)) {
+        val w = size.width
+        val h = size.height
+        val cx = w / 2f
+
+        val path = androidx.compose.ui.graphics.Path().apply {
+            moveTo(cx, h * 0.15f)
+            lineTo(w * 0.85f, h * 0.85f)
+            lineTo(cx, h * 0.62f)
+            lineTo(w * 0.15f, h * 0.85f)
+            close()
+        }
+
+        val brush = androidx.compose.ui.graphics.Brush.linearGradient(
+            colors = listOf(
+                Color(0xFF7C4DFF), // Antigravity Purple
+                Color(0xFF00E5FF)  // Antigravity Cyan
+            ),
+            start = Offset(0f, 0f),
+            end = Offset(w, h)
+        )
+        drawPath(path, brush)
+    }
+}
+
 class InteractiveGLView(context: Context, val renderer: GLPointRenderer) : GLSurfaceView(context) {
     private var previousX: Float = 0f
     private var previousY: Float = 0f
@@ -508,6 +565,38 @@ fun MainScreen(
                 .padding(horizontal = 12.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
+            // Gemini 3.7 & Google Antigravity Version Branding Badge
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                modifier = Modifier
+                    .background(Color.White.copy(alpha = 0.9f), RoundedCornerShape(4.dp))
+                    .border(1.dp, Color(0xFFE0E0E0), RoundedCornerShape(4.dp))
+                    .padding(horizontal = 6.dp, vertical = 2.dp)
+            ) {
+                GeminiSparkleLogo(modifier = Modifier.size(11.dp))
+                Text(
+                    text = "Gemini 3.7",
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 8.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF1A73E8)
+                )
+                Text(
+                    text = "•",
+                    fontSize = 8.sp,
+                    color = Color.Gray
+                )
+                AntigravityLogo(modifier = Modifier.size(11.dp))
+                Text(
+                    text = "Antigravity v2.0",
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 8.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFF7C4DFF)
+                )
+            }
+
             val gpsText = if (currentLatitude != null && currentLongitude != null) {
                 String.format("GPS: Lat %.4f, Lon %.4f", currentLatitude, currentLongitude)
             } else {
