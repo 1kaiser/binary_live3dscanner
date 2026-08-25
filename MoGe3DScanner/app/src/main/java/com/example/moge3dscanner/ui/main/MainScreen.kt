@@ -17,10 +17,13 @@ import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.material3.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
@@ -721,18 +724,40 @@ fun MainScreen(
                 modifier = Modifier.fillMaxSize()
             )
             
-            Text(
-                text = "LIVE",
-                fontSize = 8.sp,
-                fontFamily = FontFamily.Monospace,
-                color = Color.Red,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .padding(6.dp)
-                    .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(2.dp))
-                    .padding(horizontal = 4.dp, vertical = 2.dp)
-            )
+            val liveThermal = thermalManager.liveThermalBitmap.value
+            if (isThermalEnabled && liveThermal != null) {
+                Image(
+                    bitmap = liveThermal.asImageBitmap(),
+                    contentDescription = "Thermal Live Preview",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+                Text(
+                    text = "THERMAL",
+                    fontSize = 8.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = Color(0xFFFF9800),
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(6.dp)
+                        .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(2.dp))
+                        .padding(horizontal = 4.dp, vertical = 2.dp)
+                )
+            } else {
+                Text(
+                    text = "LIVE",
+                    fontSize = 8.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = Color.Red,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(6.dp)
+                        .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(2.dp))
+                        .padding(horizontal = 4.dp, vertical = 2.dp)
+                )
+            }
         }
 
         // 5. Bottom Control Panel (PLY, GLB, Shutter side-by-side using bottom 20% of screen height)

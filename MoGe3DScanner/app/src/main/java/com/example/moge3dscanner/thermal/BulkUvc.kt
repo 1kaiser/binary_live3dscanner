@@ -16,6 +16,7 @@ class BulkUvc(
     private val device: UsbDevice,
     private val conn: UsbDeviceConnection,
     private val onFrame: (ByteBuffer) -> Unit,
+    private val onReaderError: (() -> Unit)? = null,
     private val log: (String) -> Unit,
 ) {
     data class FrameDesc(
@@ -152,8 +153,14 @@ class BulkUvc(
             val n = conn.bulkTransfer(ep, chunk, chunk.size, 1000)
             if (n < 0) {
                 errStreak++
-                if (errStreak == 1 || errStreak % 50 == 0) log("bulkuvc: bulkTransfer -> $n (streak $errStreak)")
-                if (errStreak > 300) { log("bulkuvc: giving up (persistent errors)"); break }
+                if (errStreak == 1 || errStreak % 25 == 0) log("bulkuvc: bulkTransfer -> $n (streak $errStreak)")
+                if (errStreak > 60) {
+                    log("bulkuvc: giving up on current mode after persistent errors")
+                    if (delivered == 0L) {
+                        onReaderError?.invoke()
+                    }
+                    break
+                }
                 try { Thread.sleep(5) } catch (_: InterruptedException) { break }
                 continue
             }

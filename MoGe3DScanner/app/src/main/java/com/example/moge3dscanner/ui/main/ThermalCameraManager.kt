@@ -13,6 +13,8 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import androidx.compose.runtime.State
+import androidx.compose.runtime.mutableStateOf
 import com.example.moge3dscanner.thermal.BulkUvc
 import com.example.moge3dscanner.thermal.UsbDesc
 import com.example.moge3dscanner.thermal.Xtherm
@@ -22,7 +24,7 @@ import java.util.concurrent.atomic.AtomicReference
 
 /**
  * Manages USB thermal camera connections (HT-203U, InfiRay, HIKMICRO UVC devices)
- * using the native Android USB Host API and BulkUvc driver.
+ * using the native Android USB Host API and BulkUvc driver with automatic mode fallback.
  */
 class ThermalCameraManager(private val context: Context) {
 
@@ -35,6 +37,12 @@ class ThermalCameraManager(private val context: Context) {
     private val mainHandler = Handler(Looper.getMainLooper())
 
     private val latestBitmap = AtomicReference<Bitmap?>(null)
+    private val _liveThermalBitmap = mutableStateOf<Bitmap?>(null)
+    val liveThermalBitmap: State<Bitmap?> = _liveThermalBitmap
+
+    private val _tempStatusState = mutableStateOf("")
+    val tempStatusState: State<String> = _tempStatusState
+
     @Volatile private var isStreaming = false
     @Volatile private var isConnected = false
     @Volatile private var tempStatusText = ""
@@ -61,6 +69,18 @@ class ThermalCameraManager(private val context: Context) {
 
     private var receiverRegistered = false
 
+    private val watchdog = object : Runnable {
+        override fun run() {
+            if (isStreaming && framesReceived == 0L && modes.isNotEmpty()) {
+                Log.w(TAG, "Watchdog: 0 frames received in mode $modeIdx, switching...")
+                tryNextMode("watchdog timeout")
+            }
+            if (isStreaming) {
+                mainHandler.postDelayed(this, 2500)
+            }
+        }
+    }
+
     private val usbReceiver = object : BroadcastReceiver() {
         override fun onReceive(c: Context, intent: Intent) {
             when (intent.action) {
@@ -76,7 +96,7 @@ class ThermalCameraManager(private val context: Context) {
                     if (granted && device != null) {
                         openAndStart(device)
                     } else {
-                        tempStatusText = "USB permission denied"
+                        setStatus("USB permission denied")
                     }
                 }
                 UsbManager.ACTION_USB_DEVICE_ATTACHED -> {
@@ -86,7 +106,7 @@ class ThermalCameraManager(private val context: Context) {
                 UsbManager.ACTION_USB_DEVICE_DETACHED -> {
                     Log.i(TAG, "USB device detached")
                     stopStreaming()
-                    tempStatusText = "Device detached"
+                    setStatus("Device detached")
                 }
             }
         }
@@ -94,6 +114,11 @@ class ThermalCameraManager(private val context: Context) {
 
     init {
         registerReceiver()
+    }
+
+    private fun setStatus(msg: String) {
+        tempStatusText = msg
+        mainHandler.post { _tempStatusState.value = msg }
     }
 
     private fun registerReceiver() {
@@ -138,7 +163,7 @@ class ThermalCameraManager(private val context: Context) {
     private fun scanAndConnect(): Boolean {
         val device = usbManager.deviceList.values.firstOrNull { hasVideoInterface(it) }
         if (device == null) {
-            tempStatusText = "No USB thermal camera found"
+            setStatus("No USB thermal camera found")
             Log.w(TAG, "No UVC video camera device found in USB device list")
             return false
         }
@@ -151,7 +176,7 @@ class ThermalCameraManager(private val context: Context) {
             openAndStart(device)
             return true
         } else {
-            tempStatusText = "Requesting USB permission..."
+            setStatus("Requesting USB permission...")
             val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_MUTABLE else 0
             val pi = PendingIntent.getBroadcast(
                 context, 0,
@@ -167,7 +192,7 @@ class ThermalCameraManager(private val context: Context) {
         stopStreamingInternal()
         val conn = usbManager.openDevice(device)
         if (conn == null) {
-            tempStatusText = "Failed to open USB device"
+            setStatus("Failed to open USB device")
             Log.e(TAG, "usbManager.openDevice returned null")
             return
         }
@@ -176,23 +201,40 @@ class ThermalCameraManager(private val context: Context) {
         usbConn = conn
         conn.rawDescriptors?.let { Log.d(TAG, UsbDesc.summarize(it)) }
 
-        val uvc = BulkUvc(device, conn, ::onBulkFrame) { msg -> Log.d(TAG, msg) }
+        val uvc = BulkUvc(
+            device, conn,
+            onFrame = ::onBulkFrame,
+            onReaderError = {
+                mainHandler.post { tryNextMode("reader persistent errors") }
+            },
+            log = { msg -> Log.d(TAG, msg) }
+        )
         bulk = uvc
         val all = uvc.parseDescriptors()
         if (all.isEmpty()) {
-            tempStatusText = "No uncompressed frame descriptors found"
+            setStatus("No uncompressed frame descriptors found")
             Log.w(TAG, "No uncompressed frame descriptors in device")
             return
         }
 
-        // Preference: stacked 256x392 first (image + thermal), then 256x196, 256x400, etc.
-        val prio = mapOf(392 to 0, 196 to 1, 400 to 2, 200 to 3, 192 to 4)
+        // Preference: 392 (HIK layout), 344, 400, 192 (standard IR), 196, 410, 250
+        val prio = mapOf(392 to 0, 344 to 1, 400 to 2, 192 to 3, 196 to 4, 200 to 5, 410 to 6, 250 to 7)
         modes = all.sortedBy { (if (it.width == 256) 0 else 10) + (prio[it.height] ?: 9) }
+        Log.i(TAG, "Modes ordered: " + modes.joinToString { "${it.width}x${it.height}" })
         modeIdx = 0
         radiometricSeen = false
         isStreaming = true
         isConnected = true
         startMode("initial")
+
+        mainHandler.removeCallbacks(watchdog)
+        mainHandler.postDelayed(watchdog, 2500)
+    }
+
+    private fun tryNextMode(reason: String) {
+        if (!isStreaming || modes.isEmpty()) return
+        modeIdx = (modeIdx + 1) % modes.size
+        startMode("fallback ($reason) -> modeIdx=$modeIdx")
     }
 
     private fun startMode(reason: String) {
@@ -206,7 +248,9 @@ class ThermalCameraManager(private val context: Context) {
         tempTable = null
         if (!uvc.start(fd)) {
             Log.e(TAG, "Mode ${fd.width}x${fd.height} failed to start")
-            tempStatusText = "Mode ${fd.width}x${fd.height} failed"
+            setStatus("Mode ${fd.width}x${fd.height} failed")
+        } else {
+            setStatus("Connecting ${fd.width}x${fd.height}...")
         }
     }
 
@@ -269,7 +313,7 @@ class ThermalCameraManager(private val context: Context) {
         }
 
         // 2) HIKMICRO stacked layout: one block rendered YUY2, other is raw thermal counts
-        if (w == 256 && h >= 384) {
+        if (w == 256 && h >= 340) {
             fun chromaFrac(rowStart: Int): Double {
                 var hit = 0; var total = 0
                 var i = w * rowStart
@@ -310,6 +354,12 @@ class ThermalCameraManager(private val context: Context) {
             }
         }
 
+        // 4) Direct 256x192 raw mode or fallback display
+        if (w == 256 && h in 190..200) {
+            renderHikRaw(0)
+            return
+        }
+
         // Fallback: simple luma display
         val rows = minOf(h, 192)
         ensurePixels(w * rows)
@@ -318,6 +368,15 @@ class ThermalCameraManager(private val context: Context) {
             pixels[i] = (0xFF shl 24) or (y shl 16) or (y shl 8) or y
         }
         updateOutputBitmap(w, rows)
+    }
+
+    private fun drawMarker(x: Int, y: Int, w: Int, h: Int, color: Int) {
+        for (d in -3..3) {
+            val px = (x + d).coerceIn(0, w - 1)
+            val py = (y + d).coerceIn(0, h - 1)
+            pixels[y.coerceIn(0, h - 1) * w + px] = color
+            pixels[py * w + x.coerceIn(0, w - 1)] = color
+        }
     }
 
     private fun renderXtherm(meta: Xtherm.Meta, imageOff: Int) {
@@ -332,10 +391,13 @@ class ThermalCameraManager(private val context: Context) {
             val v = frameU16[imageOff + i].toInt() and 0xFFFF
             pixels[i] = palette[((v - minRaw) * 255 / span).coerceIn(0, 255)]
         }
+        drawMarker(meta.minX, meta.minY, Xtherm.WIDTH, Xtherm.HEIGHT, 0xFF40A0FF.toInt())
+        drawMarker(meta.maxX, meta.maxY, Xtherm.WIDTH, Xtherm.HEIGHT, 0xFFFF4040.toInt())
+        drawMarker(Xtherm.WIDTH / 2, Xtherm.HEIGHT / 2, Xtherm.WIDTH, Xtherm.HEIGHT, 0xFFFFFFFF.toInt())
         minTempC = table[meta.minRaw]
         centerTempC = table[meta.centerRaw]
         maxTempC = table[meta.maxRaw]
-        tempStatusText = "%.1f°C (%.1f..%.1f)".format(centerTempC, minTempC, maxTempC)
+        setStatus("%.1f°C (%.1f..%.1f)".format(centerTempC, minTempC, maxTempC))
         updateOutputBitmap(Xtherm.WIDTH, Xtherm.HEIGHT)
     }
 
@@ -344,40 +406,51 @@ class ThermalCameraManager(private val context: Context) {
     private fun renderHikRaw(offset: Int) {
         val w = Xtherm.WIDTH
         val rows = Xtherm.HEIGHT
-        var mn = 65535; var mx = 0
-        for (i in 0 until w * rows) {
+        var mn = 65535; var mx = 0; var minI = 0; var maxI = 0
+        val count = w * rows
+        if (offset + count > frameU16.size) return
+        ensurePixels(count)
+        for (i in 0 until count) {
             val v = frameU16[offset + i].toInt() and 0xFFFF
-            if (v < mn) mn = v
-            if (v > mx) mx = v
+            if (v < mn) { mn = v; minI = i }
+            if (v > mx) { mx = v; maxI = i }
         }
         val span = (mx - mn).coerceAtLeast(1)
-        ensurePixels(w * rows)
-        for (i in 0 until w * rows) {
+        for (i in 0 until count) {
             val v = frameU16[offset + i].toInt() and 0xFFFF
             pixels[i] = palette[((v - mn) * 255 / span).coerceIn(0, 255)]
         }
         val center = frameU16[offset + (rows / 2) * w + w / 2].toInt() and 0xFFFF
+        drawMarker(minI % w, minI / w, w, rows, 0xFF40A0FF.toInt())
+        drawMarker(maxI % w, maxI / w, w, rows, 0xFFFF4040.toInt())
+        drawMarker(w / 2, rows / 2, w, rows, 0xFFFFFFFF.toInt())
         minTempC = hikToC(mn)
         centerTempC = hikToC(center)
         maxTempC = hikToC(mx)
-        tempStatusText = "%.1f°C (%.1f..%.1f)".format(centerTempC, minTempC, maxTempC)
+        setStatus("%.1f°C (%.1f..%.1f)".format(centerTempC, minTempC, maxTempC))
         updateOutputBitmap(w, rows)
     }
 
     private fun renderK64(offset: Int, mn: Int, mx: Int, w: Int, rows: Int) {
         val span = (mx - mn).coerceAtLeast(1)
         val n = w * rows
+        var minI = 0; var maxI = 0
         ensurePixels(n)
         for (i in 0 until n) {
             val v = frameU16[offset + i].toInt() and 0xFFFF
+            if (v == mn) minI = i
+            if (v == mx) maxI = i
             pixels[i] = palette[((v - mn) * 255 / span).coerceIn(0, 255)]
         }
         val center = frameU16[offset + (rows / 2) * w + w / 2].toInt() and 0xFFFF
+        drawMarker(minI % w, minI / w, w, rows, 0xFF40A0FF.toInt())
+        drawMarker(maxI % w, maxI / w, w, rows, 0xFFFF4040.toInt())
+        drawMarker(w / 2, rows / 2, w, rows, 0xFFFFFFFF.toInt())
         fun k64(v: Int) = (v / 64.0 - 273.15).toFloat()
         minTempC = k64(mn)
         centerTempC = k64(center)
         maxTempC = k64(mx)
-        tempStatusText = "%.1f°C (%.1f..%.1f)".format(centerTempC, minTempC, maxTempC)
+        setStatus("%.1f°C (%.1f..%.1f)".format(centerTempC, minTempC, maxTempC))
         updateOutputBitmap(w, rows)
     }
 
@@ -386,12 +459,15 @@ class ThermalCameraManager(private val context: Context) {
             bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         }
         bitmap.setPixels(pixels, 0, w, 0, 0, w, h)
-        // Store a clean copy in latestBitmap for point-cloud coloring / snapshots
         val copy = bitmap.copy(Bitmap.Config.ARGB_8888, false)
         latestBitmap.set(copy)
+        mainHandler.post {
+            _liveThermalBitmap.value = copy
+        }
     }
 
     private fun stopStreamingInternal() {
+        mainHandler.removeCallbacks(watchdog)
         isStreaming = false
         bulk?.close()
         bulk = null
@@ -403,13 +479,14 @@ class ThermalCameraManager(private val context: Context) {
     fun stopStreaming() {
         stopStreamingInternal()
         latestBitmap.set(null)
+        mainHandler.post { _liveThermalBitmap.value = null }
     }
 
     fun captureFrame(): Bitmap? = latestBitmap.get()
 
     fun isStreaming(): Boolean = isStreaming
 
-    fun isSdkAvailable(): Boolean = true // Pure Android USB Host API, no native closed-source SDK required!
+    fun isSdkAvailable(): Boolean = true
 
     fun isDeviceConnected(): Boolean = isConnected
 
