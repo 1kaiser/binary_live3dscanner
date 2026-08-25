@@ -21,7 +21,10 @@ This skill provides the comprehensive reference, driver architecture, radiometri
   * **VideoControl (VC)**: Interface `#0` (`cls=0x0E`, `sub=0x01`), Extension Unit (XU) ID `10` (15 controls)
   * **VideoStreaming (VS)**: Interface `#1` (`cls=0x0E`, `sub=0x02`), Alternate Setting `0`
   * **Endpoint**: `EP 0x81` Bulk IN (`maxPacketSize = 512` bytes for USB 2.0 High-Speed)
-* **Uncompressed Format (`YUY2` / `bpp=16`) Modes**:
+* **Format Descriptors (`VS_FORMAT_UNCOMPRESSED`)**:
+  * `Format Index 1`: **`YUY2` (16-bit uncompressed)** — **MANDATORY for Radiometry**. Transmits genuine 16-bit microbolometer raw counts ($49,152$ uint16s).
+  * `Format Index 2`: **`NV12` (12-bit planar)** — Compressed 8-bit YUV luma plane.
+* **Uncompressed Frame Modes (under Format Index 1 `YUY2`)**:
   * `[1] 256x344` (Combined active frame + calibration rows)
   * `[2] 256x192` (Raw active microbolometer pixels: 49,152 values)
   * `[3] 256x196` (Active pixels + 4 metadata rows for Xtherm radiometry)
@@ -30,7 +33,21 @@ This skill provides the comprehensive reference, driver architecture, radiometri
 
 ---
 
-## 2. UVC Bulk Stream Negotiation & Reader Pipeline
+## 2. UVC Bulk Stream Negotiation & Format Selection
+
+### Crucial Format Selection Rule (Preventing 4-Quadrant Preview Artifacts)
+> [!IMPORTANT]
+> Always filter for `formatIndex == 1` (`YUY2` 16-bit raw).
+> If `formatIndex == 2` (`NV12` 12-bit) is selected, reading planar 8-bit YUV luma as 16-bit shorts and bit-masking with `0xFF` causes modulo 256 wrap-around every $9.5^\circ\text{C}$, producing a **$2 \times 2$ (4-preview) optical artifact** in grayscale.
+
+```kotlin
+// Strictly prioritize formatIndex == 1 (YUY2 16-bit raw radiometric frames)
+val prio = mapOf(192 to 0, 196 to 1, 400 to 2, 392 to 3, 250 to 4, 344 to 5, 410 to 6)
+val yuy2Modes = all.filter { it.formatIndex == 1 }
+modes = (if (yuy2Modes.isNotEmpty()) yuy2Modes else all).sortedBy {
+    (if (it.width == 256) 0 else 10) + (prio[it.height] ?: 9)
+}
+```
 
 ### Negotiation (PROBE / COMMIT)
 ```kotlin
@@ -41,9 +58,9 @@ conn.claimInterface(vsInterface, true)
 // 2. PROBE SET_CUR (0x21, 0x01, 0x0100)
 val ctrl = ByteArray(34)
 ctrl[0] = 0x01 // Keep dwFrameInterval
-ctrl[2] = formatIndex.toByte()
-ctrl[3] = frameIndex.toByte()
-putU32(ctrl, 4, defaultInterval)
+ctrl[2] = fd.formatIndex.toByte() // MUST BE 1
+ctrl[3] = fd.frameIndex.toByte()
+putU32(ctrl, 4, fd.defaultInterval)
 conn.controlTransfer(0x21, 0x01, 0x0100, vsIfNum, ctrl, 26, 1000)
 
 // 3. PROBE GET_CUR (0xA1, 0x81, 0x0100) & COMMIT SET_CUR (0x21, 0x01, 0x0200)
@@ -51,14 +68,6 @@ val resp = ByteArray(34)
 conn.controlTransfer(0xA1, 0x81, 0x0100, vsIfNum, resp, 34, 1000)
 conn.controlTransfer(0x21, 0x01, 0x0200, vsIfNum, resp, 34, 1000)
 ```
-
-### Reader Loop & Mode Auto-Fallback Watchdog
-1. **Packet Boundary**: Read chunks using `conn.bulkTransfer(ep, chunk, chunk.size, timeout=200ms)`.
-2. **Payload Header**: Check standard 2-12 byte UVC payload header:
-   * Bit 0: `FID` (Frame ID toggle).
-   * Bit 1: `EOF` (End of Frame).
-   * Bit 6: `ERR` (Error flag).
-3. **Resilience Watchdog**: If a negotiated mode produces persistent `-1` streak errors or `0` delivered frames within 2.0 seconds, immediately cycle to the next frame descriptor (`tryNextMode()`).
 
 ---
 
@@ -98,12 +107,10 @@ The professional Ironbow colormap maps normalized microbolometer intensity $v \i
 | **0.90** | 250 | 220 | 100 | Pale Yellow |
 | **1.00** | 255 | 255 | 255 | Pure White (Hottest) |
 
-### Contrast Normalization, Orientation & Crosshairs
-1. Identify $p_{\min}$ and $p_{\max}$ across active frame.
-2. Normalize index: $\text{idx} = \text{clamp}\left(\frac{v - p_{\min}}{p_{\max} - p_{\min}} \times 255, 0, 255\right)$.
-3. **90° Upright Portrait Transposition**: Rotate raw landscape $256 \times 192$ array clockwise to $192 \times 256$ upright portrait buffer:
+### Upright Portrait Transposition & Spot Crosshairs
+1. **$90^\circ$ Upright Transposition**: Rotate raw landscape $256 \times 192$ array clockwise to $192 \times 256$ upright portrait buffer:
    $$\text{dstX} = \text{srcH} - 1 - y, \quad \text{dstY} = x$$
-4. Render spot crosshairs:
+2. **Spot Crosshairs**:
    * 🔵 **Min spot** (`0xFF40A0FF`) at $(x_{\min}, y_{\min})$
    * 🔴 **Max spot** (`0xFFFF4040`) at $(x_{\max}, y_{\max})$
    * ⚪ **Center spot** (`0xFFFFFFFF`) at $(W/2, H/2)$
@@ -118,6 +125,9 @@ The professional Ironbow colormap maps normalized microbolometer intensity $v \i
 2. **Dedicated Fullscreen Toggle (⛶)**:
    * Add a top-corner expand icon (`FullscreenExpandIcon`) on each preview card.
    * Clicking the button expands the corresponding feed to fullscreen with high-resolution fit and an exit button (`FullscreenExitIcon`) to restore normal preview mode.
+3. **Official Branding Badges**:
+   * Vector sparkle star logo for **Gemini 3.7** (`#4285F4`, `#9B72CB`, `#D96570`).
+   * Inverted gravity delta logo for **Google Antigravity** (`#00E5FF`, `#7C4DFF`).
 
 ---
 
