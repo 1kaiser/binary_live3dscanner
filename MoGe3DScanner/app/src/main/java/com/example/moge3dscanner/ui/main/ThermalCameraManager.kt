@@ -221,10 +221,14 @@ class ThermalCameraManager(private val context: Context) {
             return
         }
 
-        // Preference: 192 (standard IR), 196 (Xtherm), 400 (stacked), 250, 344, 410
+        // Strictly use formatIndex == 1 (YUY2 16-bit raw radiometric frames)
+        // Preference: 192 (standard raw IR), 196 (Xtherm), 400 (stacked), 250, 344, 410
         val prio = mapOf(192 to 0, 196 to 1, 400 to 2, 392 to 3, 250 to 4, 344 to 5, 410 to 6)
-        modes = all.sortedBy { (if (it.width == 256) 0 else 10) + (prio[it.height] ?: 9) }
-        Log.i(TAG, "Modes ordered: " + modes.joinToString { "${it.width}x${it.height}" })
+        val yuy2Modes = all.filter { it.formatIndex == 1 }
+        modes = (if (yuy2Modes.isNotEmpty()) yuy2Modes else all).sortedBy {
+            (if (it.width == 256) 0 else 10) + (prio[it.height] ?: 9)
+        }
+        Log.i(TAG, "Modes ordered: " + modes.joinToString { "fmt=${it.formatIndex} ${it.width}x${it.height}" })
         modeIdx = 0
         radiometricSeen = false
         isStreaming = true
