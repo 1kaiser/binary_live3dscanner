@@ -5,25 +5,33 @@
 </p>
 
 <p align="center">
-  <a href="https://antigravity.google/press">
-    <img src="assets/antigravity_logo.svg" alt="Google Antigravity Logo" width="72" height="72" />
+  <a href="https://developer.android.com/blog/posts/android-cli-build-android-apps-3x-faster-using-any-agent">
+    <img src="https://developer.android.com/static/blog/assets/hours_CLI_Dark_Strapi_2x_427f20cc78_nX0qd.webp" alt="Android CLI: Build Android apps 3x faster using any agent" width="100%" />
   </a>
-  &nbsp;&nbsp;&nbsp;&nbsp;
-  <a href="https://developer.android.com/tools">
-    <img src="assets/android_cli_logo.svg" alt="Android CLI Logo" width="72" height="72" />
+</p>
+
+<p align="center">
+  <a href="https://antigravity.google/press">
+    <img src="assets/antigravity_logo.svg" alt="Google Antigravity Logo" width="68" height="68" />
+  </a>
+  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+  <a href="https://developer.android.com/blog/posts/android-cli-build-android-apps-3x-faster-using-any-agent">
+    <img src="assets/android_cli_logo.svg" alt="Android CLI Logo" width="68" height="68" />
   </a>
   <br><br>
   <img src="https://img.shields.io/badge/Gemini%203.7-Google%20DeepMind-4285F4?style=for-the-badge&logo=google&logoColor=white" alt="Gemini 3.7" />
   <a href="https://antigravity.google/press">
     <img src="https://img.shields.io/badge/Google%20Antigravity-v2.0%20Advanced%20Agentic%20Coding-7C4DFF?style=for-the-badge&logo=googlecloud&logoColor=white" alt="Google Antigravity" />
   </a>
-  <a href="https://developer.android.com/tools">
-    <img src="https://img.shields.io/badge/Android%20CLI-Command--Line%20Tools%20v11.0-3DDC84?style=for-the-badge&logo=android&logoColor=white" alt="Android CLI" />
+  <a href="https://developer.android.com/blog/posts/android-cli-build-android-apps-3x-faster-using-any-agent">
+    <img src="https://img.shields.io/badge/Android%20CLI-Official%20Blog-3DDC84?style=for-the-badge&logo=android&logoColor=white" alt="Android CLI" />
   </a>
   <img src="https://img.shields.io/badge/USB%20Host-UVC%20Thermal%20Radiometry-FF6F00?style=for-the-badge&logo=usb&logoColor=white" alt="USB Thermal" />
 </p>
 
-A self-contained Android application that performs live 3D reconstruction from single-camera RGB images and radiometric thermal cameras in real-time, utilizing the **MoGe** monocular geometry model running entirely on-device. Crafted with **Gemini 3.7**, **[Google Antigravity](https://antigravity.google/press)**, and the official **[Android CLI](https://developer.android.com/tools)** tools.
+A self-contained Android application that performs live 3D reconstruction from single-camera RGB images and radiometric thermal cameras in real-time, utilizing the **MoGe** monocular geometry model running entirely on-device.
+
+Crafted with **[Gemini 3.7](https://blog.google/technology/google-deepmind/gemini-model-updates-february-2025/)**, **[Google Antigravity](https://antigravity.google/press)**, and built 3x faster using the official **[Android CLI](https://developer.android.com/blog/posts/android-cli-build-android-apps-3x-faster-using-any-agent)**.
 
 ---
 
@@ -86,7 +94,7 @@ A self-contained Android application that performs live 3D reconstruction from s
 
 ## ⚙️ Android CLI Build & Deployment
 
-Using the official **[Android Command-Line Tools (CLI)](https://developer.android.com/tools)**:
+Built with the official **[Android CLI](https://developer.android.com/blog/posts/android-cli-build-android-apps-3x-faster-using-any-agent)** and Command-Line Tools:
 
 ```bash
 # 1. Build debug APK via Gradle
@@ -109,15 +117,16 @@ adb shell am start -n com.example.moge3dscanner/.MainActivity
 
 ---
 
-## 📚 Citations & Acknowledgments
+## 📚 Citations & References
 
-* **Google DeepMind & Gemini**:
-  * *Gemini 3.7*: [https://blog.google/technology/google-deepmind/gemini-model-updates-february-2025/](https://blog.google/technology/google-deepmind/gemini-model-updates-february-2025/)
+* **Google DeepMind & Gemini 3.7**:
+  * *Gemini 3.7 Release*: [https://blog.google/technology/google-deepmind/gemini-model-updates-february-2025/](https://blog.google/technology/google-deepmind/gemini-model-updates-february-2025/)
+  * *Gemini 3.7 Flash Image*: [https://storage.googleapis.com/gweb-uniblog-publish-prod/images/gemini-3-7-flash.width-1600.format-webp.webp](https://storage.googleapis.com/gweb-uniblog-publish-prod/images/gemini-3-7-flash.width-1600.format-webp.webp)
   * *Google Antigravity*: [https://antigravity.google/press](https://antigravity.google/press)
 
-* **Android Developer Tools**:
-  * *Android CLI & Command Line Tools*: [https://developer.android.com/tools](https://developer.android.com/tools)
-  * *Android SDK Platform Tools*: [https://developer.android.com/studio/releases/platform-tools](https://developer.android.com/studio/releases/platform-tools)
+* **Android Developer Tools & CLI**:
+  * *Android CLI Article*: [https://developer.android.com/blog/posts/android-cli-build-android-apps-3x-faster-using-any-agent](https://developer.android.com/blog/posts/android-cli-build-android-apps-3x-faster-using-any-agent)
+  * *Android Developer Tools*: [https://developer.android.com/tools](https://developer.android.com/tools)
 
 * **MoGe v1 & v2 Models**:
   State-of-the-art monocular geometry estimation by Microsoft Research.
