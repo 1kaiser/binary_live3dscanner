@@ -380,7 +380,7 @@ fun MainScreen(
             cameraExecutor.shutdown()
             currentInterpreter?.close()
             sensorManager.unregisterListener(sensorListener)
-            thermalManager.stopStreaming()
+            thermalManager.close()
         }
     }
 
@@ -508,9 +508,12 @@ fun MainScreen(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.padding(top = 2.dp)
             ) {
+                val tempInfo = thermalManager.getTemperatureInfo()
                 val thermalLabel = when {
-                    isThermalEnabled && thermalManager.isStreaming() -> "✓  Thermal Snap"
-                    isThermalEnabled && !thermalManager.isSdkAvailable() -> "✗  Thermal N/A"
+                    isThermalEnabled && thermalManager.isStreaming() -> {
+                        if (tempInfo.isNotEmpty()) "✓  Thermal ($tempInfo)" else "✓  Thermal Snap"
+                    }
+                    isThermalEnabled && !thermalManager.isStreaming() -> "…  Thermal Connecting"
                     else -> "☐  Thermal Snap"
                 }
                 Text(
@@ -519,7 +522,7 @@ fun MainScreen(
                     fontSize = 9.sp,
                     color = when {
                         isThermalEnabled && thermalManager.isStreaming() -> Color(0xFF4CAF50)
-                        isThermalEnabled && !thermalManager.isSdkAvailable() -> Color(0xFFE53935)
+                        isThermalEnabled && !thermalManager.isStreaming() -> Color(0xFFE5A020)
                         else -> Color(0xFF956820)
                     },
                     fontWeight = FontWeight.Bold,

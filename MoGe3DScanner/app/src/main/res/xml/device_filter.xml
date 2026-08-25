@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Standard UVC Video Class: Miscellaneous class with IAD -->
+    <usb-device class="239" subclass="2" protocol="1" />
+    <!-- Standard UVC Video Interface Class -->
+    <usb-device class="14" />
+    <!-- HT-203U / InfiRay / Xtherm / Hti vendor IDs -->
+    <usb-device vendor-id="3141" />  <!-- 0x0C45 Sonix / UVC cores -->
+    <usb-device vendor-id="3034" />  <!-- 0x0BDA Realtek -->
+    <usb-device vendor-id="1317" />  <!-- 0x0525 Netchip / Linux USB Gadget -->
+    <!-- Hikmicro / Hikvision thermal cores -->
+    <usb-device vendor-id="11231" product-id="320" />
+    <usb-device vendor-id="11231" product-id="257" />
+    <usb-device vendor-id="11231" product-id="258" />
+    <usb-device vendor-id="8367"  product-id="258" />
+    <usb-device vendor-id="14260" product-id="258" />
+</resources>
