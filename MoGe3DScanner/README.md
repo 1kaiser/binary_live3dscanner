@@ -1,12 +1,22 @@
 # MoGe3DScanner - Native Live 3D & Thermal Scanner
 
-<p align="left">
+<p align="center">
+  <img src="https://storage.googleapis.com/gweb-uniblog-publish-prod/images/gemini-3-7-flash.width-1600.format-webp.webp" alt="Gemini 3.7 Flash" width="100%" />
+</p>
+
+<p align="center">
+  <a href="https://antigravity.google/press">
+    <img src="assets/antigravity_logo.svg" alt="Google Antigravity Logo" width="80" height="80" />
+  </a>
+  <br>
   <img src="https://img.shields.io/badge/Gemini%203.7-Google%20DeepMind-4285F4?style=for-the-badge&logo=google&logoColor=white" alt="Gemini 3.7" />
-  <img src="https://img.shields.io/badge/Google%20Antigravity-v2.0%20Advanced%20Agentic%20Coding-7C4DFF?style=for-the-badge&logo=googlecloud&logoColor=white" alt="Google Antigravity" />
+  <a href="https://antigravity.google/press">
+    <img src="https://img.shields.io/badge/Google%20Antigravity-v2.0%20Advanced%20Agentic%20Coding-7C4DFF?style=for-the-badge&logo=googlecloud&logoColor=white" alt="Google Antigravity" />
+  </a>
   <img src="https://img.shields.io/badge/Android-USB%20Host%20UVC-3DDC84?style=for-the-badge&logo=android&logoColor=white" alt="Android UVC" />
 </p>
 
-A self-contained Android application that performs live 3D reconstruction from single-camera RGB images and radiometric thermal cameras in real-time, utilizing the **MoGe** monocular geometry model running entirely on-device. Crafted with **Gemini 3.7** and **Google Antigravity v2.0**.
+A self-contained Android application that performs live 3D reconstruction from single-camera RGB images and radiometric thermal cameras in real-time, utilizing the **MoGe** monocular geometry model running entirely on-device. Crafted with **Gemini 3.7** and **[Google Antigravity](https://antigravity.google/press)**.
 
 ---
 
@@ -89,6 +99,10 @@ adb shell am start -n com.example.moge3dscanner/.MainActivity
 ---
 
 ## 📚 Citations & Acknowledgments
+
+* **Google DeepMind & Gemini**:
+  * *Gemini 3.7*: [https://blog.google/technology/google-deepmind/gemini-model-updates-february-2025/](https://blog.google/technology/google-deepmind/gemini-model-updates-february-2025/)
+  * *Google Antigravity*: [https://antigravity.google/press](https://antigravity.google/press)
 
 * **MoGe v1 & v2 Models**:
   State-of-the-art monocular geometry estimation by Microsoft Research.
