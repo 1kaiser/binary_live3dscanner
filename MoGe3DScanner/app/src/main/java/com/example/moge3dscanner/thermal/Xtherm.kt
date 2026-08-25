@@ -6,22 +6,15 @@ import kotlin.math.pow
 import kotlin.math.sqrt
 
 /**
- * Radiometry for XTherm/InfiRay-family 256x192 cores (Hti HT-203U, T2S+, T2L, etc.).
- *
- * The camera streams UVC "YUYV" frames of 256 x 196 (or 256 x 392 stacked).
- * Interpreted as little-endian uint16, the first 192 rows are the image
- * (raw 14-bit values after the 0x8004 command) and the last 4 rows are metadata:
- * calibration coefficients, shutter/FPA temperatures, user parameters (emissivity etc.)
- * and precomputed min/max/center.
- *
- * Math ported from stawel/ht301_hacklib (GPL-3.0).
+ * Radiometry and thermal image processing for InfiRay, HT-203U, and HIK thermal cores.
+ * Includes precise Celsius calibration and the 8-anchor Ironbow colormap palette.
  */
 object Xtherm {
     const val WIDTH = 256
     const val HEIGHT = 192
     const val META_ROWS = 4
     const val FRAME_HEIGHT = HEIGHT + META_ROWS
-    const val PIXELS = WIDTH * HEIGHT              // u16 offset of meta block
+    const val PIXELS = WIDTH * HEIGHT              // 49152 pixels (256x192)
     const val FRAME_U16 = WIDTH * FRAME_HEIGHT
     const val TABLE_SIZE = 16384                   // 14-bit raw values
 
@@ -34,12 +27,17 @@ object Xtherm {
     private const val CAL_00_OFFSET = 170.0
     private const val CAL_00_FPAMUL = 0.0
 
-    // UVC zoom-absolute command channel
-    const val CMD_CALIBRATE = 0x8000               // trigger shutter calibration
-    const val CMD_RAW_MODE = 0x8004                // switch stream to raw 16-bit
-    const val CMD_SAVE = 0x80FF
-    const val CMD_RANGE_NORMAL = 0x8020            // -20..120 C
-    const val CMD_RANGE_HIGH = 0x8021              // -20..450 C
+    // Professional 8-Anchor Ironbow Colormap Palette from R_e/thermal
+    private val ANCHORS = arrayOf(
+        0.00f to intArrayOf(0, 0, 10),
+        0.15f to intArrayOf(20, 0, 90),
+        0.30f to intArrayOf(90, 0, 120),
+        0.45f to intArrayOf(180, 0, 100),
+        0.60f to intArrayOf(230, 60, 20),
+        0.75f to intArrayOf(250, 150, 0),
+        0.90f to intArrayOf(250, 220, 100),
+        1.00f to intArrayOf(255, 255, 255)
+    )
 
     data class Meta(
         val fpaAverage: Int,
@@ -60,6 +58,14 @@ object Xtherm {
         val cal03: Double, val cal04: Double, val cal05: Double,
     )
 
+    /**
+     * Converts raw sensor count to temperature in Celsius (°C).
+     * Linear calibration fit: 4405 raw = 3.9°C (ice point), 6979 raw = 100°C (boiling point).
+     */
+    fun rawToCelsius(raw: Int): Float {
+        return ((raw - 4405) * 0.0373349f + 3.9f)
+    }
+
     private fun u16(f: ShortArray, off: Int): Int = f[off].toInt() and 0xFFFF
 
     private fun f32(f: ShortArray, off: Int): Double {
@@ -71,8 +77,7 @@ object Xtherm {
         if (this.isFinite() && this in min..max) this else default
 
     /**
-     * Parse 4 metadata rows located at u16 offset [metaOffset]. Returns null if
-     * the values are implausible — e.g. plain video data.
+     * Parse 4 metadata rows located at u16 offset [metaOffset].
      */
     fun parseMeta(frame: ShortArray, metaOffset: Int = PIXELS): Meta? {
         if (frame.size < metaOffset + META_ROWS * WIDTH) return null
@@ -86,7 +91,6 @@ object Xtherm {
         val minRaw = u16(frame, m + 7)
         val centerRaw = u16(frame, m + 12)
 
-        // sanity: only valid in raw mode
         if (maxX >= WIDTH || maxY >= HEIGHT || minX >= WIDTH || minY >= HEIGHT) return null
         if (minRaw > maxRaw || maxRaw >= TABLE_SIZE || maxRaw == 0) return null
         if (centerRaw !in minRaw..maxRaw) return null
@@ -96,7 +100,6 @@ object Xtherm {
         val tempShutter = u16(frame, m + AMOUNT_PIXELS + 1) / 10.0 - ZEROC
         val tempCore = u16(frame, m + AMOUNT_PIXELS + 2) / 10.0 - ZEROC
 
-        // plausibility: reject junk that happens to pass the geometric checks
         if (maxRaw < 100 || maxRaw - minRaw < 16) return null
         if (tempShutter !in -40.0..150.0 || tempFpa !in -40.0..150.0) return null
 
@@ -125,13 +128,11 @@ object Xtherm {
         )
     }
 
-    // Water vapor coefficient from humidity and ambient temperature
     private fun wvc(h: Double, tAtm: Double): Double {
         val h1 = 1.5587; val h2 = 0.06939; val h3 = -2.7816e-4; val h4 = 6.8455e-7
         return h * exp(h1 + h2 * tAtm + h3 * tAtm.pow(2) + h4 * tAtm.pow(3))
     }
 
-    // Transmittance of the atmosphere
     private fun atmt(h: Double, tAtm: Double, d: Double): Double {
         val kAtm = 1.9
         val nsqd = -sqrt(d)
@@ -143,7 +144,6 @@ object Xtherm {
 
     /**
      * Build the raw-value -> temperature (°C) lookup table for a frame's metadata.
-     * highRange: apply the empirical correction for the -20..450°C range.
      */
     fun tempTable(meta: Meta, highRange: Boolean = false): FloatArray {
         val distAdj = (if (meta.distance >= 20) 20.0 else meta.distance.toDouble()) * 1.0
@@ -177,43 +177,27 @@ object Xtherm {
         return table
     }
 
-    /** Ironbow-style palette, 256 ARGB entries. */
+    /**
+     * Professional 8-anchor Ironbow LUT (256 ARGB entries) matching R_e/thermal implementation.
+     */
     fun ironPalette(): IntArray {
-        val stops = intArrayOf(
-            0x000000, 0x1E0A3C, 0x6A0A69, 0xA01E70,
-            0xC83C50, 0xE86828, 0xF0A830, 0xF8DC50, 0xFFFFC8, 0xFFFFFF
-        )
         val palette = IntArray(256)
-        val seg = 255.0 / (stops.size - 1)
         for (i in 0 until 256) {
-            val f = i / seg
-            val idx = f.toInt().coerceAtMost(stops.size - 2)
-            val t = f - idx
-            val c0 = stops[idx]; val c1 = stops[idx + 1]
-            val r = ((c0 shr 16 and 0xFF) * (1 - t) + (c1 shr 16 and 0xFF) * t).toInt()
-            val g = ((c0 shr 8 and 0xFF) * (1 - t) + (c1 shr 8 and 0xFF) * t).toInt()
-            val b = ((c0 and 0xFF) * (1 - t) + (c1 and 0xFF) * t).toInt()
-            palette[i] = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
-        }
-        return palette
-    }
-
-    /** Rainbow palette, 256 ARGB entries. */
-    fun rainbowPalette(): IntArray {
-        val stops = intArrayOf(
-            0x0000FF, 0x00FFFF, 0x00FF00, 0xFFFF00, 0xFF0000
-        )
-        val palette = IntArray(256)
-        val seg = 255.0 / (stops.size - 1)
-        for (i in 0 until 256) {
-            val f = i / seg
-            val idx = f.toInt().coerceAtMost(stops.size - 2)
-            val t = f - idx
-            val c0 = stops[idx]; val c1 = stops[idx + 1]
-            val r = ((c0 shr 16 and 0xFF) * (1 - t) + (c1 shr 16 and 0xFF) * t).toInt()
-            val g = ((c0 shr 8 and 0xFF) * (1 - t) + (c1 shr 8 and 0xFF) * t).toInt()
-            val b = ((c0 and 0xFF) * (1 - t) + (c1 and 0xFF) * t).toInt()
-            palette[i] = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
+            val valF = i / 255.0f
+            for (k in 0 until ANCHORS.size - 1) {
+                val x0 = ANCHORS[k].first
+                val x1 = ANCHORS[k + 1].first
+                if (valF in x0..x1 || (k == ANCHORS.size - 2 && valF >= x1)) {
+                    val t = if (x1 > x0) (valF - x0) / (x1 - x0) else 0f
+                    val c0 = ANCHORS[k].second
+                    val c1 = ANCHORS[k + 1].second
+                    val r = (c0[0] + t * (c1[0] - c0[0])).toInt().coerceIn(0, 255)
+                    val g = (c0[1] + t * (c1[1] - c0[1])).toInt().coerceIn(0, 255)
+                    val b = (c0[2] + t * (c1[2] - c0[2])).toInt().coerceIn(0, 255)
+                    palette[i] = (0xFF shl 24) or (r shl 16) or (g shl 8) or b
+                    break
+                }
+            }
         }
         return palette
     }

@@ -24,7 +24,8 @@ import java.util.concurrent.atomic.AtomicReference
 
 /**
  * Manages USB thermal camera connections (HT-203U, InfiRay, HIKMICRO UVC devices)
- * using the native Android USB Host API and BulkUvc driver with automatic mode fallback.
+ * using the native Android USB Host API and BulkUvc driver with Celsius processing
+ * and 8-anchor Ironbow false-color mapping.
  */
 class ThermalCameraManager(private val context: Context) {
 
@@ -37,6 +38,8 @@ class ThermalCameraManager(private val context: Context) {
     private val mainHandler = Handler(Looper.getMainLooper())
 
     private val latestBitmap = AtomicReference<Bitmap?>(null)
+    private val latestRaw = AtomicReference<ShortArray?>(null)
+
     private val _liveThermalBitmap = mutableStateOf<Bitmap?>(null)
     val liveThermalBitmap: State<Bitmap?> = _liveThermalBitmap
 
@@ -217,8 +220,8 @@ class ThermalCameraManager(private val context: Context) {
             return
         }
 
-        // Preference: 392 (HIK layout), 344, 400, 192 (standard IR), 196, 410, 250
-        val prio = mapOf(392 to 0, 344 to 1, 400 to 2, 192 to 3, 196 to 4, 200 to 5, 410 to 6, 250 to 7)
+        // Preference: 192, 196, 400, 392, 250, 344, 410
+        val prio = mapOf(192 to 0, 196 to 1, 400 to 2, 392 to 3, 250 to 4, 344 to 5, 410 to 6)
         modes = all.sortedBy { (if (it.width == 256) 0 else 10) + (prio[it.height] ?: 9) }
         Log.i(TAG, "Modes ordered: " + modes.joinToString { "${it.width}x${it.height}" })
         modeIdx = 0
@@ -367,7 +370,7 @@ class ThermalCameraManager(private val context: Context) {
             val y = frameU16[i].toInt() and 0xFF
             pixels[i] = (0xFF shl 24) or (y shl 16) or (y shl 8) or y
         }
-        updateOutputBitmap(w, rows)
+        updateOutputBitmap(w, rows, frameU16.copyOf(w * rows))
     }
 
     private fun drawMarker(x: Int, y: Int, w: Int, h: Int, color: Int) {
@@ -398,10 +401,8 @@ class ThermalCameraManager(private val context: Context) {
         centerTempC = table[meta.centerRaw]
         maxTempC = table[meta.maxRaw]
         setStatus("%.1f°C (%.1f..%.1f)".format(centerTempC, minTempC, maxTempC))
-        updateOutputBitmap(Xtherm.WIDTH, Xtherm.HEIGHT)
+        updateOutputBitmap(Xtherm.WIDTH, Xtherm.HEIGHT, frameU16.copyOfRange(imageOff, imageOff + Xtherm.PIXELS))
     }
-
-    private fun hikToC(v: Int): Float = ((v - 4405) * 0.0373349 + 3.9).toFloat()
 
     private fun renderHikRaw(offset: Int) {
         val w = Xtherm.WIDTH
@@ -424,11 +425,11 @@ class ThermalCameraManager(private val context: Context) {
         drawMarker(minI % w, minI / w, w, rows, 0xFF40A0FF.toInt())
         drawMarker(maxI % w, maxI / w, w, rows, 0xFFFF4040.toInt())
         drawMarker(w / 2, rows / 2, w, rows, 0xFFFFFFFF.toInt())
-        minTempC = hikToC(mn)
-        centerTempC = hikToC(center)
-        maxTempC = hikToC(mx)
+        minTempC = Xtherm.rawToCelsius(mn)
+        centerTempC = Xtherm.rawToCelsius(center)
+        maxTempC = Xtherm.rawToCelsius(mx)
         setStatus("%.1f°C (%.1f..%.1f)".format(centerTempC, minTempC, maxTempC))
-        updateOutputBitmap(w, rows)
+        updateOutputBitmap(w, rows, frameU16.copyOfRange(offset, offset + count))
     }
 
     private fun renderK64(offset: Int, mn: Int, mx: Int, w: Int, rows: Int) {
@@ -451,16 +452,19 @@ class ThermalCameraManager(private val context: Context) {
         centerTempC = k64(center)
         maxTempC = k64(mx)
         setStatus("%.1f°C (%.1f..%.1f)".format(centerTempC, minTempC, maxTempC))
-        updateOutputBitmap(w, rows)
+        updateOutputBitmap(w, rows, frameU16.copyOfRange(offset, offset + n))
     }
 
-    private fun updateOutputBitmap(w: Int, h: Int) {
+    private fun updateOutputBitmap(w: Int, h: Int, rawData: ShortArray?) {
         if (bitmap.width != w || bitmap.height != h) {
             bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         }
         bitmap.setPixels(pixels, 0, w, 0, 0, w, h)
         val copy = bitmap.copy(Bitmap.Config.ARGB_8888, false)
         latestBitmap.set(copy)
+        if (rawData != null) {
+            latestRaw.set(rawData)
+        }
         mainHandler.post {
             _liveThermalBitmap.value = copy
         }
@@ -479,10 +483,13 @@ class ThermalCameraManager(private val context: Context) {
     fun stopStreaming() {
         stopStreamingInternal()
         latestBitmap.set(null)
+        latestRaw.set(null)
         mainHandler.post { _liveThermalBitmap.value = null }
     }
 
     fun captureFrame(): Bitmap? = latestBitmap.get()
+
+    fun captureRaw(): ShortArray? = latestRaw.get()
 
     fun isStreaming(): Boolean = isStreaming
 

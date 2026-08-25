@@ -77,6 +77,46 @@ import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import android.graphics.Bitmap as AndroidBitmap
 
+private fun saveSnapshotBitmap(context: Context, bitmap: Bitmap, fileName: String) {
+    try {
+        val contentValues = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+            put(MediaStore.MediaColumns.MIME_TYPE, "image/png")
+            put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+        }
+        val resolver = context.contentResolver
+        val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
+        if (uri != null) {
+            resolver.openOutputStream(uri)?.use { out ->
+                bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+            }
+        }
+    } catch (e: Exception) {
+        Log.e("MainScreen", "Failed to save snapshot $fileName", e)
+    }
+}
+
+private fun saveSnapshotRaw(context: Context, rawData: ShortArray, fileName: String) {
+    try {
+        val contentValues = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+            put(MediaStore.MediaColumns.MIME_TYPE, "application/octet-stream")
+            put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+        }
+        val resolver = context.contentResolver
+        val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
+        if (uri != null) {
+            resolver.openOutputStream(uri)?.use { out ->
+                val buf = ByteBuffer.allocate(rawData.size * 2).order(ByteOrder.LITTLE_ENDIAN)
+                buf.asShortBuffer().put(rawData)
+                out.write(buf.array())
+            }
+        }
+    } catch (e: Exception) {
+        Log.e("MainScreen", "Failed to save raw $fileName", e)
+    }
+}
+
 class InteractiveGLView(context: Context, val renderer: GLPointRenderer) : GLSurfaceView(context) {
     private var previousX: Float = 0f
     private var previousY: Float = 0f
@@ -561,13 +601,14 @@ fun MainScreen(
             )
         }
 
-        // 4. Floating Camera Preview (Picture-in-Picture window - Dragable & Resizable)
+        // 4. Floating Dual Camera Preview (Picture-in-Picture window - Dragable & Resizable)
+        val pipHeight = if (isThermalEnabled) (230 * pipSizeMultiplier).dp else (145 * pipSizeMultiplier).dp
         Box(
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .offset { IntOffset(pipOffset.x.roundToInt(), pipOffset.y.roundToInt()) }
                 .padding(bottom = (LocalConfiguration.current.screenHeightDp * 0.2f).dp + 16.dp, end = 16.dp)
-                .size(width = (110 * pipSizeMultiplier).dp, height = (145 * pipSizeMultiplier).dp)
+                .size(width = (120 * pipSizeMultiplier).dp, height = pipHeight)
                 .shadow(6.dp, RoundedCornerShape(12.dp))
                 .clip(RoundedCornerShape(12.dp))
                 .background(Color.Black)
@@ -579,184 +620,236 @@ fun MainScreen(
                     }
                 }
         ) {
-            AndroidView(
-                factory = { ctx ->
-                    val previewView = PreviewView(ctx).apply {
-                        scaleType = PreviewView.ScaleType.FILL_CENTER
-                    }
-                    
-                    val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
-                    cameraProviderFuture.addListener({
-                        val cameraProvider = cameraProviderFuture.get()
-                        
-                        val preview = Preview.Builder().build().also {
-                            it.setSurfaceProvider(previewView.surfaceProvider)
+            Column(modifier = Modifier.fillMaxSize()) {
+                // TOP: Live Thermal Preview (when enabled)
+                if (isThermalEnabled) {
+                    val liveThermal = thermalManager.liveThermalBitmap.value
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f)
+                            .background(Color(0xFF141414))
+                    ) {
+                        if (liveThermal != null) {
+                            Image(
+                                bitmap = liveThermal.asImageBitmap(),
+                                contentDescription = "Live Thermal Preview",
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        } else {
+                            Box(
+                                modifier = Modifier.fillMaxSize(),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "Thermal\nConnecting...",
+                                    fontSize = 8.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = Color(0xFFFFB74D),
+                                    textAlign = TextAlign.Center
+                                )
+                            }
                         }
-                        
-                        val imageAnalyzer = ImageAnalysis.Builder()
-                            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                            .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
-                            .build()
-                            .also { analyzer ->
-                                analyzer.setAnalyzer(cameraExecutor) { imageProxy ->
-                                    try {
-                                        if (isContinuousScanning || shouldTakeSnapshot.compareAndSet(true, false)) {
-                                             val width = imageProxy.width
-                                             val height = imageProxy.height
-                                             val plane = imageProxy.planes[0]
-                                             val buffer = plane.buffer
-                                             
-                                             val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-                                             bitmap.copyPixelsFromBuffer(buffer)
-                                             
-                                             val rotation = imageProxy.imageInfo.rotationDegrees
-                                             val rotatedBitmap = if (rotation != 0) {
-                                                 val matrix = android.graphics.Matrix().apply { postRotate(rotation.toFloat()) }
-                                                 Bitmap.createBitmap(bitmap, 0, 0, width, height, matrix, true)
-                                             } else {
-                                                 bitmap
-                                             }
+                        val tempBadge = if (thermalManager.getTemperatureInfo().isNotEmpty()) {
+                            "IR • ${thermalManager.getTemperatureInfo()}"
+                        } else {
+                            "THERMAL"
+                        }
+                        Text(
+                            text = tempBadge,
+                            fontSize = 7.sp,
+                            fontFamily = FontFamily.Monospace,
+                            color = Color(0xFFFF9800),
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier
+                                .align(Alignment.TopStart)
+                                .padding(4.dp)
+                                .background(Color.Black.copy(alpha = 0.75f), RoundedCornerShape(2.dp))
+                                .padding(horizontal = 3.dp, vertical = 1.dp)
+                        )
+                    }
+                    // Clean Divider line
+                    Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.8f)))
+                }
 
-                                             val R_i = synchronized(captureRotationMatrix) { captureRotationMatrix.clone() }
-                                             val R_0 = synchronized(firstFrameRotationMatrix) { firstFrameRotationMatrix.clone() }
-                                             val R_0_T = transpose3x3(R_0)
-                                             val R_rel = multiply3x3(R_0_T, R_i)
-
-                                             if (isRecordDatasetModeActive.get()) {
-                                                 // Skip inference completely when recording dataset, write empty .pcl (0 points)
-                                                 val dir = currentDatasetDirRef.get()
-                                                 if (dir != null) {
-                                                     val frameIndex = datasetFrameCountRef.getAndIncrement()
-                                                     saveDatasetFrame(context, dir, frameIndex, rotatedBitmap, FloatArray(0), R_rel)
-                                                     writeStateFile(dir, frameIndex + 1, 518, 518)
-                                                 }
-                                                 Handler(Looper.getMainLooper()).post {
-                                                     isProcessingFrame = false
-                                                 }
-                                             } else {
-                                                 // Normal scanning mode: run inference
-                                                 val model = interpreter
-                                                 if (model != null) {
-                                                     Log.d("Analyzer", "Running inference: setting isProcessingFrame = true")
-                                                     Handler(Looper.getMainLooper()).post {
-                                                         isProcessingFrame = true
-                                                     }
-                                                     // Use thermal frame as color source if available
-                                                     val thermalBmp = if (isThermalEnabled) lastThermalBitmap else null
-                                                     val colorBitmap = if (thermalBmp != null) {
-                                                         Bitmap.createScaledBitmap(thermalBmp, rotatedBitmap.width, rotatedBitmap.height, true)
+                // BOTTOM: RGB Camera Preview
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                ) {
+                    AndroidView(
+                        factory = { ctx ->
+                            val previewView = PreviewView(ctx).apply {
+                                scaleType = PreviewView.ScaleType.FILL_CENTER
+                            }
+                            
+                            val cameraProviderFuture = ProcessCameraProvider.getInstance(ctx)
+                            cameraProviderFuture.addListener({
+                                val cameraProvider = cameraProviderFuture.get()
+                                
+                                val preview = Preview.Builder().build().also {
+                                    it.setSurfaceProvider(previewView.surfaceProvider)
+                                }
+                                
+                                val imageAnalyzer = ImageAnalysis.Builder()
+                                    .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                                    .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
+                                    .build()
+                                    .also { analyzer ->
+                                        analyzer.setAnalyzer(cameraExecutor) { imageProxy ->
+                                            try {
+                                                if (isContinuousScanning || shouldTakeSnapshot.compareAndSet(true, false)) {
+                                                     val width = imageProxy.width
+                                                     val height = imageProxy.height
+                                                     val plane = imageProxy.planes[0]
+                                                     val buffer = plane.buffer
+                                                     
+                                                     val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+                                                     bitmap.copyPixelsFromBuffer(buffer)
+                                                     
+                                                     val rotation = imageProxy.imageInfo.rotationDegrees
+                                                     val rotatedBitmap = if (rotation != 0) {
+                                                         val matrix = android.graphics.Matrix().apply { postRotate(rotation.toFloat()) }
+                                                         Bitmap.createBitmap(bitmap, 0, 0, width, height, matrix, true)
                                                      } else {
-                                                         rotatedBitmap
+                                                         bitmap
                                                      }
-                                                     val result = model.runInferenceWithColor(rotatedBitmap, colorBitmap, stride = 4)
-                                                     if (result != null) {
-                                                         val positions = result.first
-                                                         val colors = result.second
-                                                         val numPoints = positions.size / 3
-                                                         val glPositions = FloatArray(positions.size)
-                                                         for (j in 0 until numPoints) {
-                                                             glPositions[j * 3]     =  positions[j * 3]       // X: right → right
-                                                             glPositions[j * 3 + 1] = -positions[j * 3 + 1]  // Y: down  → up
-                                                             glPositions[j * 3 + 2] = -positions[j * 3 + 2]  // Z: into  → toward viewer
+
+                                                     // Save both feeds when snapshot is captured
+                                                     val ts = System.currentTimeMillis()
+                                                     saveSnapshotBitmap(context, rotatedBitmap, "moge_rgb_$ts.png")
+                                                     if (isThermalEnabled) {
+                                                         val thermalBmp = thermalManager.captureFrame()
+                                                         if (thermalBmp != null) {
+                                                             saveSnapshotBitmap(context, thermalBmp, "moge_thermal_$ts.png")
                                                          }
-                                                         if (isMultiModeSnapshot.get()) {
-                                                             for (j in 0 until numPoints) {
-                                                                 rotatePoint3x3(glPositions, j * 3, R_rel)
+                                                         val thermalRaw = thermalManager.captureRaw()
+                                                         if (thermalRaw != null) {
+                                                             saveSnapshotRaw(context, thermalRaw, "moge_thermal_$ts.raw")
+                                                         }
+                                                     }
+
+                                                     val R_i = synchronized(captureRotationMatrix) { captureRotationMatrix.clone() }
+                                                     val R_0 = synchronized(firstFrameRotationMatrix) { firstFrameRotationMatrix.clone() }
+                                                     val R_0_T = transpose3x3(R_0)
+                                                     val R_rel = multiply3x3(R_0_T, R_i)
+
+                                                     if (isRecordDatasetModeActive.get()) {
+                                                         // Skip inference completely when recording dataset, write empty .pcl (0 points)
+                                                         val dir = currentDatasetDirRef.get()
+                                                         if (dir != null) {
+                                                             val frameIndex = datasetFrameCountRef.getAndIncrement()
+                                                             saveDatasetFrame(context, dir, frameIndex, rotatedBitmap, FloatArray(0), R_rel)
+                                                             writeStateFile(dir, frameIndex + 1, 518, 518)
+                                                         }
+                                                         Handler(Looper.getMainLooper()).post {
+                                                             isProcessingFrame = false
+                                                         }
+                                                     } else {
+                                                         // Normal scanning mode: run inference
+                                                         val model = interpreter
+                                                         if (model != null) {
+                                                             Log.d("Analyzer", "Running inference: setting isProcessingFrame = true")
+                                                             Handler(Looper.getMainLooper()).post {
+                                                                isProcessingFrame = true
+                                                             }
+                                                             // Use thermal frame as color source if available
+                                                             val thermalBmp = if (isThermalEnabled) lastThermalBitmap else null
+                                                             val colorBitmap = if (thermalBmp != null) {
+                                                                 Bitmap.createScaledBitmap(thermalBmp, rotatedBitmap.width, rotatedBitmap.height, true)
+                                                             } else {
+                                                                 rotatedBitmap
+                                                             }
+                                                             val result = model.runInferenceWithColor(rotatedBitmap, colorBitmap, stride = 4)
+                                                             if (result != null) {
+                                                                 val positions = result.first
+                                                                 val colors = result.second
+                                                                 val numPoints = positions.size / 3
+                                                                 val glPositions = FloatArray(positions.size)
+                                                                 for (j in 0 until numPoints) {
+                                                                     glPositions[j * 3]     =  positions[j * 3]       // X: right → right
+                                                                     glPositions[j * 3 + 1] = -positions[j * 3 + 1]  // Y: down  → up
+                                                                     glPositions[j * 3 + 2] = -positions[j * 3 + 2]  // Z: into  → toward viewer
+                                                                 }
+                                                                 if (isMultiModeSnapshot.get()) {
+                                                                     for (j in 0 until numPoints) {
+                                                                         rotatePoint3x3(glPositions, j * 3, R_rel)
+                                                                     }
+                                                                 }
+                                                                 val accumulate = isContinuousScanning || isMultiModeSnapshot.get()
+                                                                 accumulator.addFrame(glPositions, colors, accumulate)
+                                                                 val (mergedPositions, mergedColors) = accumulator.getPositionsAndColors()
+                                                                 Handler(Looper.getMainLooper()).post {
+                                                                     lastPositions = mergedPositions
+                                                                     lastColors = mergedColors
+                                                                     renderer.updatePoints(mergedPositions, mergedColors)
+                                                                 }
+                                                             }
+                                                             Log.d("Analyzer", "Finished inference: setting isProcessingFrame = false")
+                                                             Handler(Looper.getMainLooper()).post {
+                                                                 isProcessingFrame = false
+                                                             }
+                                                         } else {
+                                                             Log.d("Analyzer", "Model null: setting isProcessingFrame = false")
+                                                             Handler(Looper.getMainLooper()).post {
+                                                                 isProcessingFrame = false
                                                              }
                                                          }
-                                                         val accumulate = isContinuousScanning || isMultiModeSnapshot.get()
-                                                         accumulator.addFrame(glPositions, colors, accumulate)
-                                                         val (mergedPositions, mergedColors) = accumulator.getPositionsAndColors()
-                                                         Handler(Looper.getMainLooper()).post {
-                                                             lastPositions = mergedPositions
-                                                             lastColors = mergedColors
-                                                             renderer.updatePoints(mergedPositions, mergedColors)
-                                                         }
                                                      }
-                                                     Log.d("Analyzer", "Finished inference: setting isProcessingFrame = false")
-                                                     Handler(Looper.getMainLooper()).post {
-                                                         isProcessingFrame = false
-                                                     }
-                                                 } else {
-                                                     Log.d("Analyzer", "Model null: setting isProcessingFrame = false")
-                                                     Handler(Looper.getMainLooper()).post {
-                                                         isProcessingFrame = false
-                                                     }
-                                                 }
-                                             }
-                                        } else {
-                                            Handler(Looper.getMainLooper()).post {
-                                                isProcessingFrame = false
+                                                } else {
+                                                    Handler(Looper.getMainLooper()).post {
+                                                        isProcessingFrame = false
+                                                    }
+                                                }
+                                            } catch (e: Exception) {
+                                                Log.e("Analyzer", "Frame analysis failed", e)
+                                                Log.d("Analyzer", "Exception: setting isProcessingFrame = false")
+                                                Handler(Looper.getMainLooper()).post {
+                                                    isProcessingFrame = false
+                                                }
+                                            } finally {
+                                                imageProxy.close()
                                             }
                                         }
-                                    } catch (e: Exception) {
-                                        Log.e("Analyzer", "Frame analysis failed", e)
-                                        Log.d("Analyzer", "Exception: setting isProcessingFrame = false")
-                                        Handler(Looper.getMainLooper()).post {
-                                            isProcessingFrame = false
-                                        }
-                                    } finally {
-                                        imageProxy.close()
                                     }
-                                }
-                            }
 
-                        val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
-                        try {
-                            cameraProvider.unbindAll()
-                            val camera = cameraProvider.bindToLifecycle(
-                                lifecycleOwner,
-                                cameraSelector,
-                                preview,
-                                imageAnalyzer
-                            )
-                            cameraInstance = camera
-                            camera.cameraControl.enableTorch(isFlashlightOn)
-                            statusText = "Scanning"
-                        } catch (exc: Exception) {
-                            Log.e("CameraX", "Use case binding failed", exc)
-                            statusText = "Camera error"
-                        }
-                    }, ContextCompat.getMainExecutor(ctx))
-                    
-                    previewView
-                },
-                modifier = Modifier.fillMaxSize()
-            )
-            
-            val liveThermal = thermalManager.liveThermalBitmap.value
-            if (isThermalEnabled && liveThermal != null) {
-                Image(
-                    bitmap = liveThermal.asImageBitmap(),
-                    contentDescription = "Thermal Live Preview",
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize()
-                )
-                Text(
-                    text = "THERMAL",
-                    fontSize = 8.sp,
-                    fontFamily = FontFamily.Monospace,
-                    color = Color(0xFFFF9800),
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .padding(6.dp)
-                        .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(2.dp))
-                        .padding(horizontal = 4.dp, vertical = 2.dp)
-                )
-            } else {
-                Text(
-                    text = "LIVE",
-                    fontSize = 8.sp,
-                    fontFamily = FontFamily.Monospace,
-                    color = Color.Red,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .padding(6.dp)
-                        .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(2.dp))
-                        .padding(horizontal = 4.dp, vertical = 2.dp)
-                )
+                                val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
+                                try {
+                                    cameraProvider.unbindAll()
+                                    val camera = cameraProvider.bindToLifecycle(
+                                        lifecycleOwner,
+                                        cameraSelector,
+                                        preview,
+                                        imageAnalyzer
+                                    )
+                                    cameraInstance = camera
+                                    camera.cameraControl.enableTorch(isFlashlightOn)
+                                    statusText = "Scanning"
+                                } catch (exc: Exception) {
+                                    Log.e("CameraX", "Use case binding failed", exc)
+                                    statusText = "Camera error"
+                                }
+                            }, ContextCompat.getMainExecutor(ctx))
+                            
+                            previewView
+                        },
+                        modifier = Modifier.fillMaxSize()
+                    )
+                    Text(
+                        text = if (isThermalEnabled) "RGB LIVE" else "LIVE",
+                        fontSize = 8.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = Color.Red,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .padding(4.dp)
+                            .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(2.dp))
+                            .padding(horizontal = 4.dp, vertical = 2.dp)
+                    )
+                }
             }
         }
 

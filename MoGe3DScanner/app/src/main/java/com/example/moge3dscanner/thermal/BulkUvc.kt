@@ -134,28 +134,29 @@ class BulkUvc(
 
         val expected = fd.width * fd.height * 2
         running = true
-        thread = Thread { readerLoop(ep, maxOf(expected, maxFrame)) }.apply {
+        thread = Thread { readerLoop(ep, maxOf(expected, maxFrame), maxPayload) }.apply {
             name = "bulkuvc-reader"; isDaemon = true; start()
         }
         return true
     }
 
-    private fun readerLoop(ep: UsbEndpoint, maxFrame: Int) {
+    private fun readerLoop(ep: UsbEndpoint, maxFrame: Int, maxPayload: Int) {
         val frameBuf = ByteArray(maxFrame + 8192)
         var framePos = 0
         var lastFid = -1
         var expectHeader = true
-        val chunk = ByteArray(65536)
+        val bufferLen = if (maxPayload in 512..65536) maxPayload else 16384
+        val chunk = ByteArray(bufferLen)
         var delivered = 0L
         var errStreak = 0
-        log("bulkuvc: reader started (frame buffer ${frameBuf.size} B)")
+        log("bulkuvc: reader started (frame buffer ${frameBuf.size} B, chunk ${chunk.size} B)")
         while (running) {
-            val n = conn.bulkTransfer(ep, chunk, chunk.size, 1000)
+            val n = conn.bulkTransfer(ep, chunk, chunk.size, 200)
             if (n < 0) {
                 errStreak++
-                if (errStreak == 1 || errStreak % 25 == 0) log("bulkuvc: bulkTransfer -> $n (streak $errStreak)")
-                if (errStreak > 60) {
-                    log("bulkuvc: giving up on current mode after persistent errors")
+                if (errStreak == 1 || errStreak % 10 == 0) log("bulkuvc: bulkTransfer -> $n (streak $errStreak)")
+                if (errStreak > 20) {
+                    log("bulkuvc: timeout/error threshold reached, triggering mode fallback")
                     if (delivered == 0L) {
                         onReaderError?.invoke()
                     }
