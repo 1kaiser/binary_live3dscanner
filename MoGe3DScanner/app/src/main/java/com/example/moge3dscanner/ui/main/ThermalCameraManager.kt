@@ -24,8 +24,8 @@ import java.util.concurrent.atomic.AtomicReference
 
 /**
  * Manages USB thermal camera connections (HT-203U, InfiRay, HIKMICRO UVC devices)
- * using the native Android USB Host API and BulkUvc driver with Celsius processing
- * and 8-anchor Ironbow false-color mapping.
+ * using the native Android USB Host API and BulkUvc driver with Celsius processing,
+ * 8-anchor Ironbow colormapping, and 90-degree upright portrait orientation.
  */
 class ThermalCameraManager(private val context: Context) {
 
@@ -62,8 +62,9 @@ class ThermalCameraManager(private val context: Context) {
     @Volatile private var curH = Xtherm.FRAME_HEIGHT
     @Volatile private var radiometricSeen = false
 
-    private var bitmap: Bitmap = Bitmap.createBitmap(Xtherm.WIDTH, Xtherm.HEIGHT, Bitmap.Config.ARGB_8888)
-    private var pixels = IntArray(Xtherm.PIXELS)
+    private var bitmap: Bitmap = Bitmap.createBitmap(Xtherm.HEIGHT, Xtherm.WIDTH, Bitmap.Config.ARGB_8888)
+    private var rawPixels = IntArray(Xtherm.PIXELS)
+    private var rotatedPixels = IntArray(Xtherm.PIXELS)
     private val palette = Xtherm.ironPalette()
     private var frameU16 = ShortArray(256 * 520)
     private var tempTable: FloatArray? = null
@@ -153,7 +154,7 @@ class ThermalCameraManager(private val context: Context) {
     private fun hasVideoInterface(device: UsbDevice): Boolean {
         for (i in 0 until device.interfaceCount) {
             val itf = device.getInterface(i)
-            if (itf.interfaceClass == 14) return true // UVC Video Class
+            if (itf.interfaceClass == 14) return true
         }
         return false
     }
@@ -220,7 +221,7 @@ class ThermalCameraManager(private val context: Context) {
             return
         }
 
-        // Preference: 192, 196, 400, 392, 250, 344, 410
+        // Preference: 192 (standard IR), 196 (Xtherm), 400 (stacked), 250, 344, 410
         val prio = mapOf(192 to 0, 196 to 1, 400 to 2, 392 to 3, 250 to 4, 344 to 5, 410 to 6)
         modes = all.sortedBy { (if (it.width == 256) 0 else 10) + (prio[it.height] ?: 9) }
         Log.i(TAG, "Modes ordered: " + modes.joinToString { "${it.width}x${it.height}" })
@@ -265,8 +266,9 @@ class ThermalCameraManager(private val context: Context) {
         }
     }
 
-    private fun ensurePixels(n: Int) {
-        if (pixels.size < n) pixels = IntArray(n)
+    private fun ensureBuffers(n: Int) {
+        if (rawPixels.size < n) rawPixels = IntArray(n)
+        if (rotatedPixels.size < n) rotatedPixels = IntArray(n)
     }
 
     private fun inRange(off: Int, lo: Int, hi: Int): Double {
@@ -315,7 +317,7 @@ class ThermalCameraManager(private val context: Context) {
             }
         }
 
-        // 2) HIKMICRO stacked layout: one block rendered YUY2, other is raw thermal counts
+        // 2) HIKMICRO stacked layout
         if (w == 256 && h >= 340) {
             fun chromaFrac(rowStart: Int): Double {
                 var hit = 0; var total = 0
@@ -340,7 +342,7 @@ class ThermalCameraManager(private val context: Context) {
             }
         }
 
-        // 3) Stacked frame: bottom half raw Kelvin*64 (TC001 style)
+        // 3) Stacked frame: bottom half raw Kelvin*64
         if (h >= 2 * 190) {
             val rows = h / 2
             val bottom = w * rows
@@ -357,7 +359,7 @@ class ThermalCameraManager(private val context: Context) {
             }
         }
 
-        // 4) Direct 256x192 raw mode or fallback display
+        // 4) Direct 256x192 raw mode
         if (w == 256 && h in 190..200) {
             renderHikRaw(0)
             return
@@ -365,20 +367,20 @@ class ThermalCameraManager(private val context: Context) {
 
         // Fallback: simple luma display
         val rows = minOf(h, 192)
-        ensurePixels(w * rows)
+        ensureBuffers(w * rows)
         for (i in 0 until w * rows) {
             val y = frameU16[i].toInt() and 0xFF
-            pixels[i] = (0xFF shl 24) or (y shl 16) or (y shl 8) or y
+            rawPixels[i] = (0xFF shl 24) or (y shl 16) or (y shl 8) or y
         }
         updateOutputBitmap(w, rows, frameU16.copyOf(w * rows))
     }
 
     private fun drawMarker(x: Int, y: Int, w: Int, h: Int, color: Int) {
-        for (d in -3..3) {
+        for (d in -4..4) {
             val px = (x + d).coerceIn(0, w - 1)
             val py = (y + d).coerceIn(0, h - 1)
-            pixels[y.coerceIn(0, h - 1) * w + px] = color
-            pixels[py * w + x.coerceIn(0, w - 1)] = color
+            rawPixels[y.coerceIn(0, h - 1) * w + px] = color
+            rawPixels[py * w + x.coerceIn(0, w - 1)] = color
         }
     }
 
@@ -389,10 +391,11 @@ class ThermalCameraManager(private val context: Context) {
         val table = tempTable ?: return
         val minRaw = meta.minRaw
         val span = (meta.maxRaw - minRaw).coerceAtLeast(1)
-        ensurePixels(Xtherm.PIXELS)
+        ensureBuffers(Xtherm.PIXELS)
         for (i in 0 until Xtherm.PIXELS) {
             val v = frameU16[imageOff + i].toInt() and 0xFFFF
-            pixels[i] = palette[((v - minRaw) * 255 / span).coerceIn(0, 255)]
+            val idx = ((v - minRaw) * 255 / span).coerceIn(0, 255)
+            rawPixels[i] = palette[idx]
         }
         drawMarker(meta.minX, meta.minY, Xtherm.WIDTH, Xtherm.HEIGHT, 0xFF40A0FF.toInt())
         drawMarker(meta.maxX, meta.maxY, Xtherm.WIDTH, Xtherm.HEIGHT, 0xFFFF4040.toInt())
@@ -410,7 +413,7 @@ class ThermalCameraManager(private val context: Context) {
         var mn = 65535; var mx = 0; var minI = 0; var maxI = 0
         val count = w * rows
         if (offset + count > frameU16.size) return
-        ensurePixels(count)
+        ensureBuffers(count)
         for (i in 0 until count) {
             val v = frameU16[offset + i].toInt() and 0xFFFF
             if (v < mn) { mn = v; minI = i }
@@ -419,7 +422,8 @@ class ThermalCameraManager(private val context: Context) {
         val span = (mx - mn).coerceAtLeast(1)
         for (i in 0 until count) {
             val v = frameU16[offset + i].toInt() and 0xFFFF
-            pixels[i] = palette[((v - mn) * 255 / span).coerceIn(0, 255)]
+            val idx = ((v - mn) * 255 / span).coerceIn(0, 255)
+            rawPixels[i] = palette[idx]
         }
         val center = frameU16[offset + (rows / 2) * w + w / 2].toInt() and 0xFFFF
         drawMarker(minI % w, minI / w, w, rows, 0xFF40A0FF.toInt())
@@ -436,12 +440,13 @@ class ThermalCameraManager(private val context: Context) {
         val span = (mx - mn).coerceAtLeast(1)
         val n = w * rows
         var minI = 0; var maxI = 0
-        ensurePixels(n)
+        ensureBuffers(n)
         for (i in 0 until n) {
             val v = frameU16[offset + i].toInt() and 0xFFFF
             if (v == mn) minI = i
             if (v == mx) maxI = i
-            pixels[i] = palette[((v - mn) * 255 / span).coerceIn(0, 255)]
+            val idx = ((v - mn) * 255 / span).coerceIn(0, 255)
+            rawPixels[i] = palette[idx]
         }
         val center = frameU16[offset + (rows / 2) * w + w / 2].toInt() and 0xFFFF
         drawMarker(minI % w, minI / w, w, rows, 0xFF40A0FF.toInt())
@@ -455,11 +460,28 @@ class ThermalCameraManager(private val context: Context) {
         updateOutputBitmap(w, rows, frameU16.copyOfRange(offset, offset + n))
     }
 
-    private fun updateOutputBitmap(w: Int, h: Int, rawData: ShortArray?) {
-        if (bitmap.width != w || bitmap.height != h) {
-            bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+    /**
+     * Rotate raw 256x192 landscape pixels 90 degrees clockwise into 192x256 upright portrait
+     * to match phone screen aspect ratio and R_e/thermal orientation.
+     */
+    private fun updateOutputBitmap(srcW: Int, srcH: Int, rawData: ShortArray?) {
+        val dstW = srcH  // 192
+        val dstH = srcW  // 256
+        ensureBuffers(dstW * dstH)
+
+        for (y in 0 until srcH) {
+            for (x in 0 until srcW) {
+                val srcIdx = y * srcW + x
+                val dstX = srcH - 1 - y  // 90° CW
+                val dstY = x
+                rotatedPixels[dstY * dstW + dstX] = rawPixels[srcIdx]
+            }
         }
-        bitmap.setPixels(pixels, 0, w, 0, 0, w, h)
+
+        if (bitmap.width != dstW || bitmap.height != dstH) {
+            bitmap = Bitmap.createBitmap(dstW, dstH, Bitmap.Config.ARGB_8888)
+        }
+        bitmap.setPixels(rotatedPixels, 0, dstW, 0, 0, dstW, dstH)
         val copy = bitmap.copy(Bitmap.Config.ARGB_8888, false)
         latestBitmap.set(copy)
         if (rawData != null) {
