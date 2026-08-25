@@ -12,11 +12,11 @@
 
 <p align="center">
   <a href="https://antigravity.google/press">
-    <img src="assets/antigravity_logo.svg" alt="Google Antigravity Logo" width="68" height="68" />
+    <img src="assets/antigravity_product_lockup_full_color.png" alt="Google Antigravity Lockup - Full Color" height="52" />
   </a>
   &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
   <a href="https://developer.android.com/blog/posts/android-cli-build-android-apps-3x-faster-using-any-agent">
-    <img src="assets/android_cli_logo.svg" alt="Android CLI Logo" width="68" height="68" />
+    <img src="assets/android_cli_logo.svg" alt="Android CLI Logo" height="52" />
   </a>
   <br><br>
   <img src="https://img.shields.io/badge/Gemini%203.7-Google%20DeepMind-4285F4?style=for-the-badge&logo=google&logoColor=white" alt="Gemini 3.7" />
@@ -122,7 +122,7 @@ adb shell am start -n com.example.moge3dscanner/.MainActivity
 * **Google DeepMind & Gemini 3.7**:
   * *Gemini 3.7 Release*: [https://blog.google/technology/google-deepmind/gemini-model-updates-february-2025/](https://blog.google/technology/google-deepmind/gemini-model-updates-february-2025/)
   * *Gemini 3.7 Flash Image*: [https://storage.googleapis.com/gweb-uniblog-publish-prod/images/gemini-3-7-flash.width-1600.format-webp.webp](https://storage.googleapis.com/gweb-uniblog-publish-prod/images/gemini-3-7-flash.width-1600.format-webp.webp)
-  * *Google Antigravity*: [https://antigravity.google/press](https://antigravity.google/press)
+  * *Google Antigravity Press Assets & Full Color Lockup*: [https://antigravity.google/press](https://antigravity.google/press)
 
 * **Android Developer Tools & CLI**:
   * *Android CLI Article*: [https://developer.android.com/blog/posts/android-cli-build-android-apps-3x-faster-using-any-agent](https://developer.android.com/blog/posts/android-cli-build-android-apps-3x-faster-using-any-agent)
