@@ -2,9 +2,10 @@
 name: ht203u-thermal-radiometry
 description: >-
   Driver implementation, radiometric temperature extraction in Celsius, false-color palettes,
-  and multi-sensor RGB+Thermal fusion for HT-203U, InfiRay, and HIKMICRO UVC thermal cameras
-  (VID:0x2bdf PID:0x0102). Use when developing or debugging thermal camera streaming, UVC bulk transfers,
-  radiometry equations, Ironbow LUTs, or Android USB Host integrations.
+  non-overlapping dual preview cards, fullscreen toggle mode, and multi-sensor RGB+Thermal fusion
+  for HT-203U, InfiRay, and HIKMICRO UVC thermal cameras (VID:0x2bdf PID:0x0102). Use when developing
+  or debugging thermal camera streaming, UVC bulk transfers, radiometry equations, Ironbow LUTs,
+  or Android USB Host integrations.
 ---
 
 # HT-203U & UVC Thermal Camera Radiometry Guide
@@ -97,20 +98,37 @@ The professional Ironbow colormap maps normalized microbolometer intensity $v \i
 | **0.90** | 250 | 220 | 100 | Pale Yellow |
 | **1.00** | 255 | 255 | 255 | Pure White (Hottest) |
 
-### Contrast Normalization & Crosshairs
+### Contrast Normalization, Orientation & Crosshairs
 1. Identify $p_{\min}$ and $p_{\max}$ across active frame.
 2. Normalize index: $\text{idx} = \text{clamp}\left(\frac{v - p_{\min}}{p_{\max} - p_{\min}} \times 255, 0, 255\right)$.
-3. Render spot crosshairs:
+3. **90° Upright Portrait Transposition**: Rotate raw landscape $256 \times 192$ array clockwise to $192 \times 256$ upright portrait buffer:
+   $$\text{dstX} = \text{srcH} - 1 - y, \quad \text{dstY} = x$$
+4. Render spot crosshairs:
    * 🔵 **Min spot** (`0xFF40A0FF`) at $(x_{\min}, y_{\min})$
    * 🔴 **Max spot** (`0xFFFF4040`) at $(x_{\max}, y_{\max})$
    * ⚪ **Center spot** (`0xFFFFFFFF`) at $(W/2, H/2)$
 
 ---
 
-## 5. Dual-Sensor Alignment & 3D Point Cloud Fusion
+## 5. UI Architecture: Separate Floating Cards & Fullscreen Mode
+
+1. **Non-Overlapping Layout**:
+   * Present the **Thermal Live Feed** and **RGB Camera Live Feed** as two separate floating rounded cards with elevation shadows and crisp borders.
+   * Arrange cards vertically on the screen edge using `Arrangement.spacedBy(14.dp)` within a draggable/pinch-resizable container.
+2. **Dedicated Fullscreen Toggle (⛶)**:
+   * Add a top-corner expand icon (`FullscreenExpandIcon`) on each preview card.
+   * Clicking the button expands the corresponding feed to fullscreen with high-resolution fit and an exit button (`FullscreenExitIcon`) to restore normal preview mode.
+
+---
+
+## 6. Multi-Sensor 3D Fusion & Simultaneous Archival
 
 When capturing 3D scans with simultaneous thermal data:
 1. **Geometry Generation**: Extract monocular depth field $\mathbf{D}(x, y)$ from high-resolution RGB camera using foundation models (e.g. MoGe / Depth-Anything).
 2. **Thermal Texture Mapping**: Scale and align the thermal bitmap onto the RGB coordinate space:
    $$\mathbf{C}_{\text{point}}(x, y) = \text{ThermalBitmap}\left(\frac{x}{W_{\text{rgb}}} W_{\text{th}}, \frac{y}{H_{\text{rgb}}} H_{\text{th}}\right)$$
-3. **Data Archival**: Save RGB PNG, Thermal PNG, raw 16-bit uint16 binary buffer (`.raw`), and colorized 3D geometry (`.glb` / `.ply`) containing temperature-encoded vertex colors.
+3. **Simultaneous Archival**: On shutter click, save:
+   * `moge_rgb_<ts>.png`: High-resolution RGB snapshot.
+   * `moge_thermal_<ts>.png`: Processed false-color Ironbow thermal snapshot with temperature overlays.
+   * `moge_thermal_<ts>.raw`: 16-bit raw sensor count buffer for radiometric temperature analysis.
+   * `moge_scan_<ts>.glb`: 3D point cloud / mesh combining RGB depth estimation textured with thermal heatmap data.
