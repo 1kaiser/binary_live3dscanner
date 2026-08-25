@@ -62,6 +62,8 @@ A self-contained Android application that performs live 3D reconstruction from s
 | `MainScreen.kt` | Compose UI, CameraX analyzer, sensor listener, orbital gesture handler, GPS, export |
 | `MogeInterpreter.kt` | TFLite model loading, `runForMultipleInputsOutputs`, NIO buffer management |
 | `GLPointRenderer.kt` | OpenGL ES 2.0 renderer; `gravityAlignMatrix`, `resetAngles()`, turntable rotation |
+| `ThermalCameraManager.kt` | Thermal UVC capture manager, radiometric frame decoding, and temperature readouts |
+| `thermal/` (`BulkUvc`, `Xtherm`, `UsbDesc`) | Standard Android USB Host UVC driver, InfiRay/HT-203U radiometry, and Ironbow palettes |
 
 ---
 
@@ -88,6 +90,11 @@ adb shell am start -n com.example.moge3dscanner/.MainActivity
 * **MoGe v1 & v2 Models**:
   State-of-the-art monocular geometry estimation by Microsoft Research.
   * *Repository*: [https://github.com/microsoft/MoGe](https://github.com/microsoft/MoGe)
+
+* **HT203U Thermal Camera Integration**:
+  UVC-over-bulk USB streaming and InfiRay / Xtherm radiometry ported from **HT203U-Thermal**:
+  * *Repository*: [https://github.com/cfbird/HT203U-Thermal](https://github.com/cfbird/HT203U-Thermal)
+  * *Radiometric calibration math*: [stawel/ht301_hacklib](https://github.com/stawel/ht301_hacklib)
 
 * **3D Live Scanner Historical Legacy**:
   This work builds upon the mobile 3D scanning tradition pioneered by **Luboš Vonásek**:
