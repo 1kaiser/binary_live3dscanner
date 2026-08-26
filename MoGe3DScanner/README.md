@@ -78,6 +78,10 @@ Crafted with **[Gemini 3.7](https://blog.google/technology/google-deepmind/gemin
    * **PLY**: `comment gps_latitude` / `comment gps_longitude` headers.
    * **GLB**: `asset.extras` JSON fields in the glTF binary.
 
+10. **High-Speed Sensor Dataset Recording & Offline 3D Batch Reconstruction**:
+    - **Zero-Lag Live Capture (`Dataset Rec`)**: Bypasses heavy neural network inference during continuous scanning, capturing synchronized RGB frames (`$prefix.jpg`), false-color Ironbow thermal images (`${prefix}_thermal.png`), raw 16-bit uint16 microbolometer buffers (`${prefix}_thermal.raw`), 3D IMU orientation matrices (`$prefix.mat`), and `calibration.json` at native sensor frame rates without GPU thermal throttling.
+    - **Offline Batch Reconstruction Engine (`⚡ Process Dataset`)**: Dedicated dialog and post-processor (`DatasetBatchProcessor.kt`) that iterates through recorded datasets, computes metric depth fields from RGB frames via MoGe TFLite, projects synchronized thermal textures using the calibrated homography matrix $\mathbf{H}$, and automatically exports merged 3D models (`moge_batch_<name>_<ts>.glb`) directly to `/sdcard/Download/`.
+
 ---
 
 ## 🏗️ Architecture
@@ -85,6 +89,8 @@ Crafted with **[Gemini 3.7](https://blog.google/technology/google-deepmind/gemin
 | File | Role |
 |---|---|
 | `MainScreen.kt` | Compose UI, CameraX analyzer, sensor listener, orbital gesture handler, dual floating cards, fullscreen overlays, GPS, export |
+| `DatasetBatchProcessor.kt` | Offline batch processor iterating recorded RGB+Thermal datasets, running MoGe depth inference, applying IMU transforms & exporting merged 3D GLBs |
+| `DatasetProcessorDialog.kt` | Compose UI dialog for browsing recorded datasets, triggering offline reconstruction, and tracking progress |
 | `ThermalCalibrationManager.kt` | 4-corner perspective transform, `setPolyToPoly` homography, JSON serialization & persistent calibration storage |
 | `ThermalCalibrationOverlay.kt` | Interactive full-screen calibration UI, draggable corner handles (A/B/C/D), neon guide lines, rotation & opacity controls |
 | `MogeInterpreter.kt` | TFLite model loading, `runForMultipleInputsOutputs`, NIO buffer management |

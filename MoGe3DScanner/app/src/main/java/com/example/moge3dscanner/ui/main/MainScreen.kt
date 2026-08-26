@@ -386,6 +386,7 @@ fun MainScreen(
     val isRecordDatasetModeActive = remember { AtomicBoolean(false) }
     val currentDatasetDirRef = remember { java.util.concurrent.atomic.AtomicReference<java.io.File?>(null) }
     val datasetFrameCountRef = remember { java.util.concurrent.atomic.AtomicInteger(0) }
+    var isDatasetProcessorOpen by remember { mutableStateOf(false) }
 
     var isViewingModel by remember { mutableStateOf(false) }
     var modelBase64 by remember { mutableStateOf("") }
@@ -657,9 +658,9 @@ fun MainScreen(
                     }
                 )
             }
-            // Row 2: Dataset Rec and Flash
+            // Row 2: Dataset Rec, Process Dataset and Flash
             Row(
-                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.padding(top = 2.dp)
             ) {
@@ -676,6 +677,16 @@ fun MainScreen(
                             currentDatasetDirRef.set(null)
                             datasetFrameCountRef.set(0)
                         }
+                    }
+                )
+                Text(
+                    text = "⚡  Process Dataset",
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 9.sp,
+                    color = Color(0xFF00E5FF),
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.clickable {
+                        isDatasetProcessorOpen = true
                     }
                 )
                 Text(
@@ -980,7 +991,9 @@ fun MainScreen(
                                                      val dir = currentDatasetDirRef.get()
                                                      if (dir != null) {
                                                          val frameIndex = datasetFrameCountRef.getAndIncrement()
-                                                         saveDatasetFrame(context, dir, frameIndex, rotatedBitmap, FloatArray(0), R_rel)
+                                                         val thermalBmp = if (isThermalEnabled) (lastThermalBitmap ?: thermalManager.captureFrame()) else null
+                                                         val thermalRaw = if (isThermalEnabled) thermalManager.captureRaw() else null
+                                                         saveDatasetFrame(context, dir, frameIndex, rotatedBitmap, thermalBmp, thermalRaw, FloatArray(0), R_rel)
                                                          writeStateFile(dir, frameIndex + 1, 518, 518)
                                                      }
                                                      Handler(Looper.getMainLooper()).post {
@@ -1301,6 +1314,12 @@ fun MainScreen(
                                 datasetFrameCountRef.set(0)
                                 writeStateFile(dir, 0, 518, 518)
                                 writeRotationFile(dir, 0f)
+                                val cal = activeCalibrationRef.get()
+                                try {
+                                    java.io.File(dir, "calibration.json").writeText(cal.toJson())
+                                } catch (e: Exception) {
+                                    Log.e("DatasetRec", "Failed to write calibration.json", e)
+                                }
                                 Toast.makeText(context, "Recording dataset to ${dir.name}!", Toast.LENGTH_SHORT).show()
                             }
                         }
@@ -1401,6 +1420,20 @@ fun MainScreen(
                 }
             }
         }
+
+        // 7. Offline Dataset Post-Processing Dialog
+        if (isDatasetProcessorOpen) {
+            DatasetProcessorDialog(
+                interpreter = interpreter,
+                onModelReconstructed = { positions, colors ->
+                    lastPositions = positions
+                    lastColors = colors
+                    renderer.updatePoints(positions, colors)
+                    glViewRef.value?.requestRender()
+                },
+                onDismiss = { isDatasetProcessorOpen = false }
+            )
+        }
     } // end outer Box
 } // end MainScreen
 
@@ -1436,7 +1469,7 @@ private fun exportPly(positions: FloatArray, colors: FloatArray, latitude: Doubl
     return sb.toString()
 }
 
-private fun exportGlb(positions: FloatArray, colors: FloatArray, latitude: Double? = null, longitude: Double? = null): ByteArray {
+fun exportGlb(positions: FloatArray, colors: FloatArray, latitude: Double? = null, longitude: Double? = null): ByteArray {
     val numPoints = positions.size / 3
     
     // Compute bounding box for POSITION accessor
@@ -1641,7 +1674,7 @@ class PointCloudAccumulator {
     }
 }
 
-private fun rotatePoint3x3(p: FloatArray, offset: Int, R: FloatArray) {
+fun rotatePoint3x3(p: FloatArray, offset: Int, R: FloatArray) {
     val x = p[offset]
     val y = p[offset + 1]
     val z = p[offset + 2]
@@ -1679,33 +1712,55 @@ private fun saveDatasetFrame(
     datasetDir: java.io.File,
     frameIndex: Int,
     bitmap: Bitmap,
+    thermalBitmap: Bitmap?,
+    thermalRaw: ShortArray?,
     rawPositions: FloatArray,
     R_rel: FloatArray
 ) {
     try {
         val prefix = String.format(java.util.Locale.US, "%08d", frameIndex)
 
-        // 1. Save Image (.jpg)
+        // 1. Save RGB Image (.jpg)
         val imageFile = java.io.File(datasetDir, "$prefix.jpg")
         java.io.FileOutputStream(imageFile).use { out ->
-            bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 92, out)
         }
 
-        // 2. Save Point Cloud (.pcl)
-        val numPoints = rawPositions.size / 3
-        val pclFile = java.io.File(datasetDir, "$prefix.pcl")
-        java.io.FileOutputStream(pclFile).use { out ->
-            val byteBuffer = java.nio.ByteBuffer.allocate(4 + numPoints * 16).apply {
-                order(java.nio.ByteOrder.LITTLE_ENDIAN)
-                putInt(numPoints)
-                for (i in 0 until numPoints) {
-                    putFloat(rawPositions[i * 3])
-                    putFloat(rawPositions[i * 3 + 1])
-                    putFloat(rawPositions[i * 3 + 2])
-                    putFloat(1.0f) // Confidence
-                }
+        // 2. Save Thermal Image (.png)
+        if (thermalBitmap != null) {
+            val thermalFile = java.io.File(datasetDir, "${prefix}_thermal.png")
+            java.io.FileOutputStream(thermalFile).use { out ->
+                thermalBitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
             }
-            out.write(byteBuffer.array())
+        }
+
+        // 3. Save Raw Radiometric Counts (.raw)
+        if (thermalRaw != null) {
+            val rawFile = java.io.File(datasetDir, "${prefix}_thermal.raw")
+            java.io.FileOutputStream(rawFile).use { out ->
+                val bb = java.nio.ByteBuffer.allocate(thermalRaw.size * 2).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+                for (s in thermalRaw) bb.putShort(s)
+                out.write(bb.array())
+            }
+        }
+
+        // 4. Save Point Cloud (.pcl) if present
+        val numPoints = rawPositions.size / 3
+        if (numPoints > 0) {
+            val pclFile = java.io.File(datasetDir, "$prefix.pcl")
+            java.io.FileOutputStream(pclFile).use { out ->
+                val byteBuffer = java.nio.ByteBuffer.allocate(4 + numPoints * 16).apply {
+                    order(java.nio.ByteOrder.LITTLE_ENDIAN)
+                    putInt(numPoints)
+                    for (i in 0 until numPoints) {
+                        putFloat(rawPositions[i * 3])
+                        putFloat(rawPositions[i * 3 + 1])
+                        putFloat(rawPositions[i * 3 + 2])
+                        putFloat(1.0f) // Confidence
+                    }
+                }
+                out.write(byteBuffer.array())
+            }
         }
 
         // 3. Save Matrices (.mat)
