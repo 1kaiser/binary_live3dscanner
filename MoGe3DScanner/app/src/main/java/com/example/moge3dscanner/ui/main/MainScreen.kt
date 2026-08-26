@@ -229,14 +229,18 @@ fun AntigravityLogo(modifier: Modifier = Modifier) {
 class InteractiveGLView(context: Context, val renderer: GLPointRenderer) : GLSurfaceView(context) {
     private var previousX: Float = 0f
     private var previousY: Float = 0f
-    private var previousTwoFingerAngle = 0f
+
+    private var previousMidX = 0f
+    private var previousMidY = 0f
+    private var isTwoFingerGesture = false
 
     private val scaleDetector = ScaleGestureDetector(context, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
         override fun onScale(detector: ScaleGestureDetector): Boolean {
-            renderer.targetZoom /= detector.scaleFactor
-            if (renderer.targetZoom < 1.0f) renderer.targetZoom = 1.0f
-            if (renderer.targetZoom > 10.0f) renderer.targetZoom = 10.0f
-            requestRender()
+            val scale = detector.scaleFactor
+            if (scale > 0.01f) {
+                renderer.targetZoom = (renderer.targetZoom / scale).coerceIn(0.5f, 15.0f)
+                requestRender()
+            }
             return true
         }
     })
@@ -248,47 +252,40 @@ class InteractiveGLView(context: Context, val renderer: GLPointRenderer) : GLSur
         renderer.requestRenderListener = { requestRender() }
     }
 
-    private var isPanning = false
-    private var previousMidX = 0f
-    private var previousMidY = 0f
-
     override fun onTouchEvent(event: MotionEvent): Boolean {
         scaleDetector.onTouchEvent(event)
-        if (scaleDetector.isInProgress) {
-            isPanning = false
-            return true
-        }
 
         val pointerCount = event.pointerCount
 
-        if (pointerCount == 2) {
+        if (pointerCount >= 2) {
             val midX = (event.getX(0) + event.getX(1)) / 2f
             val midY = (event.getY(0) + event.getY(1)) / 2f
 
             when (event.actionMasked) {
                 MotionEvent.ACTION_POINTER_DOWN -> {
-                    isPanning = true
+                    isTwoFingerGesture = true
                     previousMidX = midX
                     previousMidY = midY
-                    renderer.spinVelocity = 0f
+                    renderer.yawVelocity = 0f
+                    renderer.pitchVelocity = 0f
                 }
                 MotionEvent.ACTION_MOVE -> {
-                    if (isPanning) {
+                    if (isTwoFingerGesture && !scaleDetector.isInProgress) {
                         val dx = midX - previousMidX
                         val dy = midY - previousMidY
 
-                        // Scale pan sensitivity by current zoom
-                        val sensitivity = 0.0015f * renderer.zoom
+                        // 2-finger pan scaled by current distance
+                        val sensitivity = 0.002f * renderer.zoom
                         renderer.targetPanX += dx * sensitivity
-                        renderer.targetPanY -= dy * sensitivity // Flip Y axis
-                        
+                        renderer.targetPanY -= dy * sensitivity
+
                         previousMidX = midX
                         previousMidY = midY
                         requestRender()
                     }
                 }
                 MotionEvent.ACTION_POINTER_UP -> {
-                    isPanning = false
+                    isTwoFingerGesture = false
                     val actionIndex = event.actionIndex
                     val remainingIndex = if (actionIndex == 0) 1 else 0
                     if (remainingIndex < event.pointerCount) {
@@ -305,43 +302,34 @@ class InteractiveGLView(context: Context, val renderer: GLPointRenderer) : GLSur
                 MotionEvent.ACTION_DOWN -> {
                     previousX = x
                     previousY = y
-                    isPanning = false
+                    isTwoFingerGesture = false
                     renderer.isTouching = true
-                    renderer.spinVelocity = 0f
+                    renderer.yawVelocity = 0f
+                    renderer.pitchVelocity = 0f
                 }
                 MotionEvent.ACTION_MOVE -> {
-                    if (!isPanning) {
+                    if (!isTwoFingerGesture && !scaleDetector.isInProgress) {
                         val dx = x - previousX
                         val dy = y - previousY
 
-                        val dist = Math.sqrt((dx * dx + dy * dy).toDouble()).toFloat()
-                        if (dist > 0.01f) {
-                            val angle = dist * 0.15f // Drag sensitivity gain
-                            val axisX = -dy / dist
-                            val axisY = dx / dist
+                        val rotSensitivity = 0.35f
+                        val dYaw = dx * rotSensitivity
+                        val dPitch = dy * rotSensitivity
 
-                            // Create delta rotation around screen-space axis
-                            val deltaRot = FloatArray(16)
-                            android.opengl.Matrix.setIdentityM(deltaRot, 0)
-                            android.opengl.Matrix.rotateM(deltaRot, 0, angle, axisX, axisY, 0f)
+                        renderer.targetYaw += dYaw
+                        renderer.targetPitch = (renderer.targetPitch + dPitch).coerceIn(-85f, 85f)
 
-                            // Multiply on the left of cumulative user rotation
-                            val temp = FloatArray(16)
-                            android.opengl.Matrix.multiplyMM(temp, 0, deltaRot, 0, renderer.userRotationMatrix, 0)
-                            System.arraycopy(temp, 0, renderer.userRotationMatrix, 0, 16)
+                        renderer.yawVelocity = dYaw * 0.4f
+                        renderer.pitchVelocity = dPitch * 0.4f
 
-                            // Set roll velocity & axis for momentum glide
-                            renderer.spinVelocity = angle
-                            renderer.spinAxisX = axisX
-                            renderer.spinAxisY = axisY
-                            requestRender()
-                        }
+                        requestRender()
                     }
                     previousX = x
                     previousY = y
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                     renderer.isTouching = false
+                    isTwoFingerGesture = false
                     requestRender()
                 }
             }

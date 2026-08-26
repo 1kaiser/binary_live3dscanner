@@ -27,16 +27,16 @@ object Xtherm {
     private const val CAL_00_OFFSET = 170.0
     private const val CAL_00_FPAMUL = 0.0
 
-    // Professional 8-Anchor Ironbow Colormap Palette from R_e/thermal
+    // Classic High-Contrast Vibrant Thermal Ironbow Colormap Palette
     private val ANCHORS = arrayOf(
-        0.00f to intArrayOf(0, 0, 10),
-        0.15f to intArrayOf(20, 0, 90),
-        0.30f to intArrayOf(90, 0, 120),
-        0.45f to intArrayOf(180, 0, 100),
-        0.60f to intArrayOf(230, 60, 20),
-        0.75f to intArrayOf(250, 150, 0),
-        0.90f to intArrayOf(250, 220, 100),
-        1.00f to intArrayOf(255, 255, 255)
+        0.00f to intArrayOf(0, 0, 80),        // Deep Blue
+        0.15f to intArrayOf(60, 0, 140),      // Royal Violet
+        0.30f to intArrayOf(140, 0, 160),     // Purple / Magenta
+        0.45f to intArrayOf(210, 25, 60),     // Crimson Red
+        0.60f to intArrayOf(245, 90, 0),      // Vivid Orange-Red
+        0.75f to intArrayOf(255, 175, 0),     // Golden Amber
+        0.90f to intArrayOf(255, 235, 60),    // Bright Yellow
+        1.00f to intArrayOf(255, 255, 255)    // Pure White Highlight
     )
 
     data class Meta(

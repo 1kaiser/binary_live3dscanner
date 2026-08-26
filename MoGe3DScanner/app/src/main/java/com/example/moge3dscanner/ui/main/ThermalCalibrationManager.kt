@@ -206,7 +206,7 @@ object ThermalCalibrationManager {
     ): Bitmap {
         val pureThermal = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(pureThermal)
-        canvas.drawColor(android.graphics.Color.rgb(10, 10, 15)) // Dark neutral background for non-thermal region
+        canvas.drawColor(android.graphics.Color.rgb(247, 246, 242)) // Light neutral original background
 
         if (thermalBitmap == null) return pureThermal
 

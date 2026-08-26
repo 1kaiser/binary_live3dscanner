@@ -45,7 +45,7 @@ class GLPointRenderer : GLSurfaceView.Renderer {
     private val projMatrix = FloatArray(16)
     private val mvpMatrix = FloatArray(16)
 
-    // Center offsets
+    // Centroid offsets
     private var centerX: Float = 0f
     private var centerY: Float = 0f
     private var centerZ: Float = 0f
@@ -53,44 +53,47 @@ class GLPointRenderer : GLSurfaceView.Renderer {
     // Listener for rendering trigger
     var onNewPointsListener: (() -> Unit)? = null
 
-    // Touch interaction values (current interpolated state)
+    // Orbital Euler Angles (in degrees)
+    var yaw: Float = 0f              // Azimuth (horizontal spin around Y axis)
+    var pitch: Float = 0f            // Elevation (vertical tilt around X axis)
+    var targetYaw: Float = 0f
+    var targetPitch: Float = 0f
+
+    // Zoom distance & Pan offsets
     var zoom: Float = 3.0f
+    var targetZoom: Float = 3.0f
+
     var panX: Float = 0f
     var panY: Float = 0f
-
-    // Target values to interpolate towards (Space Opera/model-viewer style controls)
-    var targetZoom: Float = 3.0f
     var targetPanX: Float = 0f
     var targetPanY: Float = 0f
 
-    // Cumulative screen-space trackball/arcball rotation matrix
-    val userRotationMatrix = FloatArray(16).also { Matrix.setIdentityM(it, 0) }
-
-    // Velocity momentum (flick-to-spin) for trackball
-    var spinVelocity: Float = 0f
-    var spinAxisX: Float = 0f
-    var spinAxisY: Float = 0f
+    // Fling momentum velocities (degrees/frame)
+    var yawVelocity: Float = 0f
+    var pitchVelocity: Float = 0f
     var isTouching: Boolean = false
 
     // Gravity-aligned base orientation captured at scan time (4x4 column-major)
     val gravityAlignMatrix: FloatArray = FloatArray(16).also { Matrix.setIdentityM(it, 0) }
 
-    // Smooth camera transition animation tracking
+    // Smooth animation frame timing
     private var lastFrameTimeNs: Long = 0L
     var requestRenderListener: (() -> Unit)? = null
 
-    /** Resets user-applied rotation and pan back to the gravity-aligned default. */
+    /** Resets user-applied orbital rotation and pan back to default origin. */
     fun resetAngles() {
-        Matrix.setIdentityM(userRotationMatrix, 0)
+        targetYaw = 0f
+        targetPitch = 0f
+        yaw = 0f
+        pitch = 0f
         targetZoom = 3.0f
+        zoom = 3.0f
         targetPanX = 0f
         targetPanY = 0f
-        zoom = 3.0f
         panX = 0f
         panY = 0f
-        spinVelocity = 0f
-        spinAxisX = 0f
-        spinAxisY = 0f
+        yawVelocity = 0f
+        pitchVelocity = 0f
         isTouching = false
         lastFrameTimeNs = 0L
     }
@@ -128,7 +131,7 @@ class GLPointRenderer : GLSurfaceView.Renderer {
     }
 
     override fun onSurfaceCreated(unused: GL10?, config: EGLConfig?) {
-        // Set clear color to light theme background (#f7f6f2)
+        // Clear color matching app theme background (#F7F6F2)
         GLES20.glClearColor(0.97f, 0.96f, 0.95f, 1.0f)
 
         // Compile shaders
@@ -158,78 +161,87 @@ class GLPointRenderer : GLSurfaceView.Renderer {
     override fun onDrawFrame(unused: GL10?) {
         GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT or GLES20.GL_DEPTH_BUFFER_BIT)
 
-        // Interpolate rotation and zoom towards target values (interpolation decay)
         val now = System.nanoTime()
-        val dt = if (lastFrameTimeNs == 0L) 0.016f else (now - lastFrameTimeNs) / 1_000_000_000f
+        val dt = if (lastFrameTimeNs == 0L) 0.016f else ((now - lastFrameTimeNs) / 1_000_000_000f).coerceIn(0.001f, 0.1f)
         lastFrameTimeNs = now
 
-        val decay = 12f // Damping factor matching model-viewer's default style feel
-        val factor = (1.0f - Math.exp((-decay * dt).toDouble())).toFloat()
-
-        // Apply momentum (flick-to-spin) when user is not touching the screen
-        // Apply momentum (flick-to-spin) for trackball when user is not touching the screen
-        if (!isTouching && spinVelocity > 0f) {
-            val frictionDecay = 4.0f
+        // 1. Apply momentum velocity glide when user is not touching
+        if (!isTouching && (Math.abs(yawVelocity) > 0.05f || Math.abs(pitchVelocity) > 0.05f)) {
+            val frictionDecay = 6.0f
             val frictionFactor = Math.exp((-frictionDecay * dt).toDouble()).toFloat()
 
-            // Apply incremental rotation for this frame
-            val deltaRot = FloatArray(16)
-            Matrix.setIdentityM(deltaRot, 0)
-            Matrix.rotateM(deltaRot, 0, spinVelocity * dt * 60f, spinAxisX, spinAxisY, 0f)
+            targetYaw += yawVelocity * dt * 60f
+            targetPitch = (targetPitch + pitchVelocity * dt * 60f).coerceIn(-85f, 85f)
 
-            val temp = FloatArray(16)
-            Matrix.multiplyMM(temp, 0, deltaRot, 0, userRotationMatrix, 0)
-            System.arraycopy(temp, 0, userRotationMatrix, 0, 16)
+            yawVelocity *= frictionFactor
+            pitchVelocity *= frictionFactor
 
-            spinVelocity *= frictionFactor
-            if (spinVelocity < 0.05f) {
-                spinVelocity = 0f
-            }
+            if (Math.abs(yawVelocity) < 0.05f) yawVelocity = 0f
+            if (Math.abs(pitchVelocity) < 0.05f) pitchVelocity = 0f
         }
 
+        // 2. Exponential smoothing towards target values
+        val decay = 18f
+        val factor = (1.0f - Math.exp((-decay * dt).toDouble())).toFloat()
+
+        val diffYaw = targetYaw - yaw
+        val diffPitch = targetPitch - pitch
         val diffZoom = targetZoom - zoom
         val diffPanX = targetPanX - panX
         val diffPanY = targetPanY - panY
 
-        val zoomThreshold = 0.01f
-        val panThreshold = 0.001f
-        val isAnimatingZoom = Math.abs(diffZoom) > zoomThreshold
-        val isAnimatingPan = Math.abs(diffPanX) > panThreshold || Math.abs(diffPanY) > panThreshold
-        val isAnimatingVelocity = spinVelocity > 0f
+        val isAnimating = Math.abs(diffYaw) > 0.05f ||
+                Math.abs(diffPitch) > 0.05f ||
+                Math.abs(diffZoom) > 0.005f ||
+                Math.abs(diffPanX) > 0.001f ||
+                Math.abs(diffPanY) > 0.001f ||
+                Math.abs(yawVelocity) > 0.05f ||
+                Math.abs(pitchVelocity) > 0.05f
 
-        if (isAnimatingZoom || isAnimatingPan || isAnimatingVelocity) {
+        if (isAnimating) {
+            yaw += diffYaw * factor
+            pitch += diffPitch * factor
             zoom += diffZoom * factor
             panX += diffPanX * factor
             panY += diffPanY * factor
             requestRenderListener?.invoke()
         } else {
+            yaw = targetYaw
+            pitch = targetPitch
             zoom = targetZoom
             panX = targetPanX
             panY = targetPanY
             lastFrameTimeNs = 0L
         }
 
-        // Camera setup
+        // 3. Camera View Matrix (placed at (0, 0, zoom) looking at origin + pan)
         Matrix.setLookAtM(vMatrix, 0, 0f, 0f, zoom, 0f, 0f, 0f, 0f, 1f, 0f)
-        // Apply camera pan (translate view matrix)
         Matrix.translateM(vMatrix, 0, panX, panY, 0f)
 
-        // Step 1: translate cloud to centroid origin
+        // 4. Model Matrix: Pitch & Yaw Turntable Rotation centered around point cloud centroid
+        val modelMatrix = FloatArray(16)
+        Matrix.setIdentityM(modelMatrix, 0)
+
+        // Pitch tilt (elevation)
+        Matrix.rotateM(modelMatrix, 0, pitch, 1f, 0f, 0f)
+        // Yaw spin (azimuth)
+        Matrix.rotateM(modelMatrix, 0, yaw, 0f, 1f, 0f)
+
+        // Multiply gravity base alignment
+        val gravModel = FloatArray(16)
+        Matrix.multiplyMM(gravModel, 0, modelMatrix, 0, gravityAlignMatrix, 0)
+
+        // Translate to origin
         val translateM = FloatArray(16)
         Matrix.setIdentityM(translateM, 0)
         Matrix.translateM(translateM, 0, -centerX, -centerY, -centerZ)
 
-        // Step 2: apply gravity-aligned base orientation (captured at scan time)
-        val gravModel = FloatArray(16)
-        Matrix.multiplyMM(gravModel, 0, gravityAlignMatrix, 0, translateM, 0)
-
-        // Step 3: apply user rotation in WORLD space as a left-multiply.
-        val modelMatrix = FloatArray(16)
-        Matrix.multiplyMM(modelMatrix, 0, userRotationMatrix, 0, gravModel, 0)
+        val finalModel = FloatArray(16)
+        Matrix.multiplyMM(finalModel, 0, gravModel, 0, translateM, 0)
 
         // MVP = Proj * View * Model
         val scratch = FloatArray(16)
-        Matrix.multiplyMM(scratch, 0, vMatrix, 0, modelMatrix, 0)
+        Matrix.multiplyMM(scratch, 0, vMatrix, 0, finalModel, 0)
         Matrix.multiplyMM(mvpMatrix, 0, projMatrix, 0, scratch, 0)
 
         // Draw points
