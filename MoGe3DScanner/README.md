@@ -130,6 +130,14 @@ adb shell pm grant com.example.moge3dscanner android.permission.ACCESS_COARSE_LO
 adb shell am start -n com.example.moge3dscanner/.MainActivity
 ```
 
+## 11. Google Filament Native 3D Rendering (`Filament3DViewer`)
+
+For 100% native 3D rendering with zero HTML, zero WebView, and zero JavaScript overhead, the application integrates **Google Filament** (`com.google.android.filament:1.71.5`):
+* **Native PBR Engine**: Hardware-accelerated Vulkan / OpenGL ES 3.0 physically based rendering.
+* **Direct GLB Loading**: Uses Filament's native `gltfio.AssetLoader` to parse and render binary glTF buffers directly on the GPU.
+* **Native Orbit CameraManipulator**: Built-in turntable orbit controls (single-finger yaw/pitch, pinch zoom, pan, momentum damping).
+* **Zero Overhead**: Direct `SurfaceView` integration rendering at native 120 FPS vsync via `Choreographer`.
+
 ---
 
 ## 📚 Citations & References
