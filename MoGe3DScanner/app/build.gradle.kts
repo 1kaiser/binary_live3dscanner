@@ -97,4 +97,10 @@ dependencies {
   implementation(files("libs/tensorflow-lite-api-2.14.0.jar"))
   implementation(files("libs/tensorflow-lite-gpu-2.14.0.jar"))
   implementation(files("libs/tensorflow-lite-gpu-api-2.14.0.jar"))
+
+  // Google Filament (Native PBR Engine, GLB/glTF Loader & Manipulator Orbit Controls)
+  val filamentVersion = "1.71.5"
+  implementation("com.google.android.filament:filament-android:$filamentVersion")
+  implementation("com.google.android.filament:gltfio-android:$filamentVersion")
+  implementation("com.google.android.filament:filament-utils-android:$filamentVersion")
 }

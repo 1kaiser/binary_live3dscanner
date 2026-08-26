@@ -384,6 +384,7 @@ fun MainScreen(
 
     var isViewingModel by remember { mutableStateOf(false) }
     var modelBase64 by remember { mutableStateOf("") }
+    var modelGlbBytes by remember { mutableStateOf<ByteArray?>(null) }
 
     var isFlashlightOn by remember { mutableStateOf(false) }
     var cameraInstance by remember { mutableStateOf<androidx.camera.core.Camera?>(null) }
@@ -1284,8 +1285,8 @@ fun MainScreen(
                                     val gpsTag = if (currentLatitude != null && currentLongitude != null) " (GPS tagged)" else ""
                                     Toast.makeText(context, "GLB saved to Downloads!$gpsTag", Toast.LENGTH_SHORT).show()
 
-                                    // Open model-viewer embedded preview
-                                    modelBase64 = android.util.Base64.encodeToString(glbData, android.util.Base64.NO_WRAP)
+                                    // Open Filament native 3D preview
+                                    modelGlbBytes = glbData
                                     isViewingModel = true
                                 } else {
                                     Toast.makeText(context, "Failed to create GLB file.", Toast.LENGTH_SHORT).show()
@@ -1441,8 +1442,8 @@ fun MainScreen(
             } // end shutter Box
         } // end Row
 
-        // 6. Embedded <model-viewer> WebView overlay
-        if (isViewingModel && modelBase64.isNotEmpty()) {
+        // 6. Native Google Filament 3D Viewer overlay (Zero HTML / Zero WebView)
+        if (isViewingModel && modelGlbBytes != null) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -1450,27 +1451,17 @@ fun MainScreen(
             ) {
                 AndroidView(
                     factory = { ctx ->
-                        android.webkit.WebView(ctx).apply {
-                            settings.javaScriptEnabled = true
-                            settings.domStorageEnabled = true
-                            settings.allowFileAccess = true
-                            settings.allowContentAccess = true
-                            settings.allowFileAccessFromFileURLs = true
-                            settings.allowUniversalAccessFromFileURLs = true
-                            settings.loadWithOverviewMode = true
-                            settings.useWideViewPort = true
-                            webChromeClient = android.webkit.WebChromeClient()
-                            webViewClient = android.webkit.WebViewClient()
-                            loadDataWithBaseURL("https://ajax.googleapis.com", getModelViewerHtml(modelBase64), "text/html", "utf-8", null)
+                        Filament3DViewer(ctx).apply {
+                            modelGlbBytes?.let { bytes -> loadGlbData(bytes) }
                         }
                     },
-                    update = { webView ->
-                        webView.loadDataWithBaseURL("https://ajax.googleapis.com", getModelViewerHtml(modelBase64), "text/html", "utf-8", null)
+                    update = { viewer ->
+                        modelGlbBytes?.let { bytes -> viewer.loadGlbData(bytes) }
                     },
                     modifier = Modifier.fillMaxSize()
                 )
 
-                // Top Bar in <model-viewer> overlay
+                // Top Bar in Filament 3D Viewer overlay
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1479,7 +1470,7 @@ fun MainScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Mode Switcher inside model-viewer
+                    // Mode Switcher inside Filament 3D Viewer
                     if (lastTripleResult != null) {
                         Row(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -1499,8 +1490,7 @@ fun MainScreen(
                                     activeColorMode = PointCloudColorMode.FUSED
                                     val triple = lastTripleResult
                                     if (triple != null) {
-                                        val glb = exportGlb(triple.fused.first, triple.fused.second)
-                                        modelBase64 = android.util.Base64.encodeToString(glb, android.util.Base64.NO_WRAP)
+                                        modelGlbBytes = exportGlb(triple.fused.first, triple.fused.second)
                                     }
                                 }
                             )
@@ -1514,8 +1504,7 @@ fun MainScreen(
                                     activeColorMode = PointCloudColorMode.RGB
                                     val triple = lastTripleResult
                                     if (triple != null) {
-                                        val glb = exportGlb(triple.rgb.first, triple.rgb.second)
-                                        modelBase64 = android.util.Base64.encodeToString(glb, android.util.Base64.NO_WRAP)
+                                        modelGlbBytes = exportGlb(triple.rgb.first, triple.rgb.second)
                                     }
                                 }
                             )
@@ -1529,8 +1518,7 @@ fun MainScreen(
                                     activeColorMode = PointCloudColorMode.THERMAL
                                     val triple = lastTripleResult
                                     if (triple != null) {
-                                        val glb = exportGlb(triple.thermal.first, triple.thermal.second)
-                                        modelBase64 = android.util.Base64.encodeToString(glb, android.util.Base64.NO_WRAP)
+                                        modelGlbBytes = exportGlb(triple.thermal.first, triple.thermal.second)
                                     }
                                 }
                             )
