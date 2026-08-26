@@ -193,4 +193,63 @@ object ThermalCalibrationManager {
 
         return fused
     }
+
+    /**
+     * Warps the thermal heatmap onto an isolated neutral dark background matching the RGB resolution
+     * according to the 4-corner perspective calibration quad ABCD.
+     */
+    fun createPureThermalColorBitmap(
+        width: Int,
+        height: Int,
+        thermalBitmap: Bitmap?,
+        calibration: ThermalCalibration
+    ): Bitmap {
+        val pureThermal = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(pureThermal)
+        canvas.drawColor(android.graphics.Color.rgb(10, 10, 15)) // Dark neutral background for non-thermal region
+
+        if (thermalBitmap == null) return pureThermal
+
+        val rotatedThermal = if (calibration.thermalRotationDegrees % 360 != 0) {
+            val rotMatrix = Matrix().apply {
+                postRotate(calibration.thermalRotationDegrees.toFloat())
+            }
+            Bitmap.createBitmap(
+                thermalBitmap, 0, 0,
+                thermalBitmap.width, thermalBitmap.height,
+                rotMatrix, true
+            )
+        } else {
+            thermalBitmap
+        }
+
+        val thW = rotatedThermal.width.toFloat()
+        val thH = rotatedThermal.height.toFloat()
+
+        val src = floatArrayOf(
+            0f, 0f,
+            thW, 0f,
+            thW, thH,
+            0f, thH
+        )
+
+        val dst = floatArrayOf(
+            calibration.cornerA.first * width, calibration.cornerA.second * height,
+            calibration.cornerB.first * width, calibration.cornerB.second * height,
+            calibration.cornerC.first * width, calibration.cornerC.second * height,
+            calibration.cornerD.first * width, calibration.cornerD.second * height
+        )
+
+        val warpMatrix = Matrix()
+        val success = warpMatrix.setPolyToPoly(src, 0, dst, 0, 4)
+
+        if (success) {
+            val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+            canvas.drawBitmap(rotatedThermal, warpMatrix, paint)
+        } else {
+            canvas.drawBitmap(rotatedThermal, 0f, 0f, null)
+        }
+
+        return pureThermal
+    }
 }

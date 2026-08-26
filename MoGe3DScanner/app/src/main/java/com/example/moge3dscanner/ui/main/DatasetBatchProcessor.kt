@@ -27,10 +27,22 @@ data class DatasetItem(
 )
 
 /**
+ * Result bundle containing all 3 representations: Fused, Pure RGB, and Pure Thermal.
+ */
+data class TripleReconstructionResult(
+    val fused: Pair<FloatArray, FloatArray>,
+    val rgb: Pair<FloatArray, FloatArray>,
+    val thermal: Pair<FloatArray, FloatArray>
+)
+
+/**
  * Post-Processing Engine for recorded datasets.
  * Performs offline batch monocular depth estimation on RGB frames,
  * projects synchronized radiometric thermal heatmaps using 4-corner homography,
- * and generates merged 3D Point Clouds (.glb / .ply).
+ * and generates separate 3D Point Clouds (.glb / .ply) for:
+ * 1. FUSED: Natural RGB context with Thermal region-of-interest overlay
+ * 2. RGB: Pure optical camera colors
+ * 3. THERMAL: Pure isolated thermal temperature false colors
  */
 object DatasetBatchProcessor {
 
@@ -57,7 +69,7 @@ object DatasetBatchProcessor {
         datasetItem: DatasetItem,
         interpreter: MogeInterpreter,
         onProgress: (current: Int, total: Int, status: String) -> Unit
-    ): Pair<FloatArray, FloatArray>? = withContext(Dispatchers.Default) {
+    ): TripleReconstructionResult? = withContext(Dispatchers.Default) {
         try {
             val dir = datasetItem.directory
             val files = dir.listFiles() ?: return@withContext null
@@ -78,11 +90,13 @@ object DatasetBatchProcessor {
             val totalFrames = rgbFiles.size
             if (totalFrames == 0) return@withContext null
 
-            val accumulator = PointCloudAccumulator()
+            val fusedAccumulator = PointCloudAccumulator()
+            val rgbAccumulator = PointCloudAccumulator()
+            val thermalAccumulator = PointCloudAccumulator()
 
             for ((index, rgbFile) in rgbFiles.withIndex()) {
                 withContext(Dispatchers.Main) {
-                    onProgress(index + 1, totalFrames, "Processing frame ${index + 1}/$totalFrames...")
+                    onProgress(index + 1, totalFrames, "Processing frame ${index + 1}/$totalFrames (RGB + Thermal + Fused)...")
                 }
 
                 val prefix = rgbFile.name.substringBefore(".").substringBefore("_rgb")
@@ -120,8 +134,8 @@ object DatasetBatchProcessor {
                     }
                 }
 
-                // D. Prepare Fused Color Bitmap (RGB + Calibrated Thermal Overlay)
-                val colorBitmap = if (thermalBitmap != null) {
+                // D. Prepare Textures: Fused and Pure Thermal
+                val fusedColorBitmap = if (thermalBitmap != null) {
                     ThermalCalibrationManager.createFusedColorBitmap(
                         rgbBitmap = rgbBitmap,
                         thermalBitmap = thermalBitmap,
@@ -132,11 +146,25 @@ object DatasetBatchProcessor {
                     rgbBitmap
                 }
 
-                // E. Run MoGe Metric Depth Inference on pure RGB frame
-                val result = interpreter.runInferenceWithColor(rgbBitmap, colorBitmap, stride = 4)
+                val pureThermalColorBitmap = if (thermalBitmap != null) {
+                    ThermalCalibrationManager.createPureThermalColorBitmap(
+                        width = rgbBitmap.width,
+                        height = rgbBitmap.height,
+                        thermalBitmap = thermalBitmap,
+                        calibration = calibration
+                    )
+                } else {
+                    rgbBitmap
+                }
+
+                // E. Run MoGe Metric Depth Inference ONCE on pure RGB frame
+                val result = interpreter.runInferenceWithColor(rgbBitmap, rgbBitmap, stride = 4)
                 if (result != null) {
                     val positions = result.first
-                    val colors = result.second
+                    val rgbColors = result.second
+                    val fusedColors = interpreter.sampleColors(fusedColorBitmap, stride = 4)
+                    val thermalColors = interpreter.sampleColors(pureThermalColorBitmap, stride = 4)
+
                     val numPoints = positions.size / 3
                     val glPositions = FloatArray(positions.size)
 
@@ -151,40 +179,55 @@ object DatasetBatchProcessor {
                         rotatePoint3x3(glPositions, j * 3, rRel)
                     }
 
-                    accumulator.addFrame(glPositions, colors, accumulate = true)
+                    fusedAccumulator.addFrame(glPositions, fusedColors, accumulate = true)
+                    rgbAccumulator.addFrame(glPositions, rgbColors, accumulate = true)
+                    thermalAccumulator.addFrame(glPositions, thermalColors, accumulate = true)
                 }
             }
 
             withContext(Dispatchers.Main) {
-                onProgress(totalFrames, totalFrames, "Exporting merged 3D model...")
+                onProgress(totalFrames, totalFrames, "Exporting 3D models (Fused, RGB, Thermal)...")
             }
 
-            val (mergedPos, mergedCol) = accumulator.getPositionsAndColors()
+            val fusedData = fusedAccumulator.getPositionsAndColors()
+            val rgbData = rgbAccumulator.getPositionsAndColors()
+            val thermalData = thermalAccumulator.getPositionsAndColors()
 
-            // 3. Export Merged GLB and PLY to Downloads
-            if (mergedPos.isNotEmpty()) {
-                val ts = System.currentTimeMillis()
-                val glbData = exportGlb(mergedPos, mergedCol, null, null)
+            // 3. Export all 3 Variations to Downloads
+            val ts = System.currentTimeMillis()
+            saveGlbToDownloads(context, "moge_batch_${datasetItem.name}_${ts}_fused.glb", exportGlb(fusedData.first, fusedData.second))
+            saveGlbToDownloads(context, "moge_batch_${datasetItem.name}_${ts}_rgb.glb", exportGlb(rgbData.first, rgbData.second))
+            saveGlbToDownloads(context, "moge_batch_${datasetItem.name}_${ts}_thermal.glb", exportGlb(thermalData.first, thermalData.second))
 
-                val contentValues = ContentValues().apply {
-                    put(MediaStore.MediaColumns.DISPLAY_NAME, "moge_batch_${datasetItem.name}_$ts.glb")
-                    put(MediaStore.MediaColumns.MIME_TYPE, "model/gltf-binary")
-                    put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
-                }
-                val resolver = context.contentResolver
-                val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
-                if (uri != null) {
-                    resolver.openOutputStream(uri)?.use { out ->
-                        out.write(glbData)
-                    }
-                }
-                Log.i(TAG, "Batch reconstruction exported: moge_batch_${datasetItem.name}_$ts.glb")
-            }
+            Log.i(TAG, "Triple batch reconstructions exported for ${datasetItem.name}")
 
-            Pair(mergedPos, mergedCol)
+            TripleReconstructionResult(
+                fused = fusedData,
+                rgb = rgbData,
+                thermal = thermalData
+            )
         } catch (e: Exception) {
             Log.e(TAG, "Batch processing failed for dataset ${datasetItem.name}", e)
             null
+        }
+    }
+
+    private fun saveGlbToDownloads(context: Context, fileName: String, glbBytes: ByteArray) {
+        try {
+            val contentValues = ContentValues().apply {
+                put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+                put(MediaStore.MediaColumns.MIME_TYPE, "model/gltf-binary")
+                put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+            }
+            val resolver = context.contentResolver
+            val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
+            if (uri != null) {
+                resolver.openOutputStream(uri)?.use { out ->
+                    out.write(glbBytes)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to save $fileName", e)
         }
     }
 }

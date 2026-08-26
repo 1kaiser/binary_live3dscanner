@@ -35,7 +35,7 @@ import java.util.Locale
 @Composable
 fun DatasetProcessorDialog(
     interpreter: MogeInterpreter?,
-    onModelReconstructed: (positions: FloatArray, colors: FloatArray) -> Unit,
+    onModelReconstructed: (TripleReconstructionResult) -> Unit,
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
@@ -202,8 +202,8 @@ fun DatasetProcessorDialog(
                                 )
                                 isProcessing = false
                                 if (result != null) {
-                                    Toast.makeText(context, "✓ 3D Model Reconstructed & Exported!", Toast.LENGTH_LONG).show()
-                                    onModelReconstructed(result.first, result.second)
+                                    Toast.makeText(context, "✓ Reconstructed 3 Models (Fused, RGB, Thermal) & Exported!", Toast.LENGTH_LONG).show()
+                                    onModelReconstructed(result)
                                     onDismiss()
                                 } else {
                                     Toast.makeText(context, "Reconstruction failed or empty dataset", Toast.LENGTH_SHORT).show()

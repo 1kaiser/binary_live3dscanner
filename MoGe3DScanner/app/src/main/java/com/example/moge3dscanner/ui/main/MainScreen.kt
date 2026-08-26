@@ -123,6 +123,10 @@ enum class FullscreenMode {
     NONE, THERMAL, CAMERA
 }
 
+enum class PointCloudColorMode {
+    FUSED, RGB, THERMAL
+}
+
 @Composable
 fun FullscreenExpandIcon(modifier: Modifier = Modifier, color: Color = Color.White) {
     Canvas(modifier = modifier.size(14.dp)) {
@@ -387,6 +391,8 @@ fun MainScreen(
     val currentDatasetDirRef = remember { java.util.concurrent.atomic.AtomicReference<java.io.File?>(null) }
     val datasetFrameCountRef = remember { java.util.concurrent.atomic.AtomicInteger(0) }
     var isDatasetProcessorOpen by remember { mutableStateOf(false) }
+    var activeColorMode by remember { mutableStateOf(PointCloudColorMode.FUSED) }
+    var lastTripleResult by remember { mutableStateOf<TripleReconstructionResult?>(null) }
 
     var isViewingModel by remember { mutableStateOf(false) }
     var modelBase64 by remember { mutableStateOf("") }
@@ -751,6 +757,66 @@ fun MainScreen(
                         isCalibrationMode = !isCalibrationMode
                     }
                 )
+            }
+            // Row 5: 3D Color Mode (Fused / RGB / Thermal)
+            if (lastPositions != null || lastTripleResult != null) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(top = 2.dp)
+                ) {
+                    Text(
+                        text = "3D Mode:",
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 8.sp,
+                        color = Color.Gray
+                    )
+                    Text(
+                        text = if (activeColorMode == PointCloudColorMode.FUSED) "● Fused" else "○ Fused",
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 8.sp,
+                        color = if (activeColorMode == PointCloudColorMode.FUSED) Color(0xFF00E5FF) else Color(0xFF956820),
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.clickable {
+                            activeColorMode = PointCloudColorMode.FUSED
+                            val triple = lastTripleResult
+                            if (triple != null) {
+                                renderer.updatePoints(triple.fused.first, triple.fused.second)
+                                glViewRef.value?.requestRender()
+                            }
+                        }
+                    )
+                    Text(
+                        text = if (activeColorMode == PointCloudColorMode.RGB) "● RGB" else "○ RGB",
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 8.sp,
+                        color = if (activeColorMode == PointCloudColorMode.RGB) Color(0xFF4CAF50) else Color(0xFF956820),
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.clickable {
+                            activeColorMode = PointCloudColorMode.RGB
+                            val triple = lastTripleResult
+                            if (triple != null) {
+                                renderer.updatePoints(triple.rgb.first, triple.rgb.second)
+                                glViewRef.value?.requestRender()
+                            }
+                        }
+                    )
+                    Text(
+                        text = if (activeColorMode == PointCloudColorMode.THERMAL) "● Thermal" else "○ Thermal",
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 8.sp,
+                        color = if (activeColorMode == PointCloudColorMode.THERMAL) Color(0xFFFF5252) else Color(0xFF956820),
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.clickable {
+                            activeColorMode = PointCloudColorMode.THERMAL
+                            val triple = lastTripleResult
+                            if (triple != null) {
+                                renderer.updatePoints(triple.thermal.first, triple.thermal.second)
+                                glViewRef.value?.requestRender()
+                            }
+                        }
+                    )
+                }
             }
         }
 
@@ -1425,7 +1491,13 @@ fun MainScreen(
         if (isDatasetProcessorOpen) {
             DatasetProcessorDialog(
                 interpreter = interpreter,
-                onModelReconstructed = { positions, colors ->
+                onModelReconstructed = { tripleResult ->
+                    lastTripleResult = tripleResult
+                    val (positions, colors) = when (activeColorMode) {
+                        PointCloudColorMode.FUSED -> tripleResult.fused
+                        PointCloudColorMode.RGB -> tripleResult.rgb
+                        PointCloudColorMode.THERMAL -> tripleResult.thermal
+                    }
                     lastPositions = positions
                     lastColors = colors
                     renderer.updatePoints(positions, colors)

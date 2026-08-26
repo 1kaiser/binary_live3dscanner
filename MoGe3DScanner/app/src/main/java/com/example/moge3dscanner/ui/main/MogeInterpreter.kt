@@ -138,6 +138,33 @@ class MogeInterpreter(private val context: Context) {
         return Pair(positions, colors)
     }
 
+    /**
+     * Extracts normalized RGB color floats from an arbitrary bitmap for 3D point coloring.
+     */
+    fun sampleColors(bitmap: Bitmap, stride: Int = 4): FloatArray {
+        val scaled = Bitmap.createScaledBitmap(bitmap, 518, 518, true)
+        val pixels = IntArray(518 * 518)
+        scaled.getPixels(pixels, 0, 518, 0, 0, 518, 518)
+
+        val step = stride
+        val stepsX = (518 + step - 1) / step
+        val size = stepsX * stepsX
+        val colors = FloatArray(size * 3)
+
+        var idx = 0
+        for (y in 0 until 518 step step) {
+            for (x in 0 until 518 step step) {
+                val i = y * 518 + x
+                val pixel = pixels[i]
+                colors[idx * 3]     = ((pixel shr 16) and 0xFF) / 255.0f
+                colors[idx * 3 + 1] = ((pixel shr 8)  and 0xFF) / 255.0f
+                colors[idx * 3 + 2] = (pixel and 0xFF) / 255.0f
+                idx++
+            }
+        }
+        return colors
+    }
+
     fun close() {
         interpreter?.close()
         gpuDelegate?.close()

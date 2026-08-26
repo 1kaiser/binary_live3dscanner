@@ -80,7 +80,14 @@ Crafted with **[Gemini 3.7](https://blog.google/technology/google-deepmind/gemin
 
 10. **High-Speed Sensor Dataset Recording & Offline 3D Batch Reconstruction**:
     - **Zero-Lag Live Capture (`Dataset Rec`)**: Bypasses heavy neural network inference during continuous scanning, capturing synchronized RGB frames (`$prefix.jpg`), false-color Ironbow thermal images (`${prefix}_thermal.png`), raw 16-bit uint16 microbolometer buffers (`${prefix}_thermal.raw`), 3D IMU orientation matrices (`$prefix.mat`), and `calibration.json` at native sensor frame rates without GPU thermal throttling.
-    - **Offline Batch Reconstruction Engine (`⚡ Process Dataset`)**: Dedicated dialog and post-processor (`DatasetBatchProcessor.kt`) that iterates through recorded datasets, computes metric depth fields from RGB frames via MoGe TFLite, projects synchronized thermal textures using the calibrated homography matrix $\mathbf{H}$, and automatically exports merged 3D models (`moge_batch_<name>_<ts>.glb`) directly to `/sdcard/Download/`.
+    - **Offline Batch Reconstruction Engine (`⚡ Process Dataset`)**: Dedicated dialog and post-processor (`DatasetBatchProcessor.kt`) that iterates through recorded datasets, computes metric depth fields from RGB frames via MoGe TFLite, projects synchronized thermal textures using the calibrated homography matrix $\mathbf{H}$, and automatically exports 3D models directly to `/sdcard/Download/`.
+
+11. **Triple 3D Model Generation & Live Viewport Mode Switcher**:
+    - Generates **3 distinct representations** from a single depth pass:
+      1. **🌈 Fused Model (`_fused.glb`)**: Natural high-resolution RGB visual textures with true radiometric Ironbow thermal heatmap overlaid inside the calibrated 4-corner quad $ABCD$.
+      2. **📷 Pure RGB Model (`_rgb.glb`)**: Crisp, natural full-color optical camera textures.
+      3. **🌡️ Pure Thermal Model (`_thermal.glb`)**: Isolated false-color thermal temperatures on the 3D surface with dark neutral background.
+    - **Real-Time 3D Mode Selector**: HUD switcher (`● Fused  ○ RGB  ○ Thermal`) allows instantly toggling the active 3D point cloud colors in the OpenGL ES turntable orbital viewport with zero reloading latency.
 
 ---
 
@@ -88,12 +95,12 @@ Crafted with **[Gemini 3.7](https://blog.google/technology/google-deepmind/gemin
 
 | File | Role |
 |---|---|
-| `MainScreen.kt` | Compose UI, CameraX analyzer, sensor listener, orbital gesture handler, dual floating cards, fullscreen overlays, GPS, export |
-| `DatasetBatchProcessor.kt` | Offline batch processor iterating recorded RGB+Thermal datasets, running MoGe depth inference, applying IMU transforms & exporting merged 3D GLBs |
+| `MainScreen.kt` | Compose UI, CameraX analyzer, sensor listener, orbital gesture handler, dual floating cards, 3D mode selector (Fused/RGB/Thermal), GPS, export |
+| `DatasetBatchProcessor.kt` | Offline batch processor generating triple 3D models (Fused, RGB, Thermal) from recorded RGB+Thermal datasets |
 | `DatasetProcessorDialog.kt` | Compose UI dialog for browsing recorded datasets, triggering offline reconstruction, and tracking progress |
-| `ThermalCalibrationManager.kt` | 4-corner perspective transform, `setPolyToPoly` homography, JSON serialization & persistent calibration storage |
+| `ThermalCalibrationManager.kt` | 4-corner perspective transform, `setPolyToPoly` homography, pure thermal & fused texture generation, JSON serialization |
 | `ThermalCalibrationOverlay.kt` | Interactive full-screen calibration UI, draggable corner handles (A/B/C/D), neon guide lines, rotation & opacity controls |
-| `MogeInterpreter.kt` | TFLite model loading, `runForMultipleInputsOutputs`, NIO buffer management |
+| `MogeInterpreter.kt` | TFLite model loading, `sampleColors` multi-texture extraction, `runForMultipleInputsOutputs`, NIO buffer management |
 | `GLPointRenderer.kt` | OpenGL ES 2.0 renderer; `gravityAlignMatrix`, `resetAngles()`, turntable rotation |
 | `ThermalCameraManager.kt` | Thermal UVC capture manager, radiometric frame decoding, Celsius conversions, and 90° upright portrait rotation |
 | `thermal/` (`BulkUvc`, `Xtherm`, `UsbDesc`) | Standard Android USB Host UVC driver, InfiRay/HT-203U radiometry, and 8-anchor Ironbow LUT |
