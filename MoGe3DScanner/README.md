@@ -44,27 +44,36 @@ Crafted with **[Gemini 3.7](https://blog.google/technology/google-deepmind/gemin
    - **Fullscreen Toggle (⛶)**: Dedicated expand button on each preview card allowing instant full-screen inspection with a one-tap exit button.
    - Draggable and pinch-to-zoom resizable across the screen without overlapping.
 
-4. **Gravity-Aligned Point Cloud Orientation**:
+4. **Interactive 4-Corner (A, B, C, D) Perspective Calibration & Homography**:
+   - Dedicated **4-Corner Calibrate** button in HUD.
+   - Overlays live thermal camera stream with adjustable opacity directly over the full-screen RGB camera view.
+   - **4 Draggable Handles**: (A: Cyan Top-Left, B: Gold Top-Right, C: Red Bottom-Right, D: Green Bottom-Left) to visually align thermal heat features with real-world objects.
+   - **Stream Rotation (⟳)**: Cycles $0^\circ, 90^\circ, 180^\circ, 270^\circ$ to handle any USB-C cable or physical dongle orientation.
+   - **One-Tap JSON Archival**: Saves timestamped JSON (`moge_calibration_<timestamp>.json`) and active config to `/sdcard/Download/`.
+   - **Zero-Distortion 3D Point Cloud Texture Mapping**: MoGe infers depth geometry solely from high-resolution RGB frames; the calibrated perspective homography matrix $\mathbf{H}$ projects false-color Ironbow thermal temperature data directly onto the corresponding 3D vertices without retraining the depth model.
+
+5. **Gravity-Aligned Point Cloud Orientation**:
    At the moment the shutter is tapped, the live `TYPE_ROTATION_VECTOR` sensor matrix is captured and converted to a 4×4 OpenGL column-major matrix. This matrix becomes the **base orientation** of the rendered point cloud — so the scene always appears physically upright (gravity pointing down) immediately after a scan, regardless of how the phone was held.
 
-5. **Simultaneous Multi-Sensor Snapshot Archival**:
+6. **Simultaneous Multi-Sensor Snapshot Archival**:
    Tapping the shutter button automatically captures and archives all data to `/sdcard/Download/`:
    - `moge_rgb_<timestamp>.png`: Full-resolution RGB photo.
    - `moge_thermal_<timestamp>.png`: Colorized thermal heatmap snapshot.
    - `moge_thermal_<timestamp>.raw`: Raw 16-bit radiometric microbolometer counts.
+   - `moge_calibration_<timestamp>.json`: Calibrated 4-corner perspective and rotation metadata.
    - `moge_scan_<timestamp>.glb`: 3D point cloud mesh textured with thermal data.
 
-6. **Turntable Orbital Controls**:
+7. **Turntable Orbital Controls**:
    - **Single-finger drag left/right**: Spins the model around its world-vertical Y-axis.
    - **Single-finger drag up/down**: Tilts the model toward/away from the viewer (no perpendicular roll).
    - **Two-finger pinch**: Zoom in/out.
    - **Two-finger pan**: Translate the model in screen space.
    - **↺ Reset button**: Instantly snaps the view back to the gravity-aligned default orientation, clearing any user-applied rotation and pan.
 
-7. **Multi-Frame Scan Accumulator**:
+8. **Multi-Frame Scan Accumulator**:
    A thread-safe `PointCloudAccumulator` merges point clouds from multiple frames on-the-fly with a FIFO cap of 150,000 points for fluid OpenGL ES 2.0 rendering.
 
-8. **GPS Metadata Tagging**:
+9. **GPS Metadata Tagging**:
    Retrieves live location via `LocationManager` and embeds GPS coordinates in:
    * **PLY**: `comment gps_latitude` / `comment gps_longitude` headers.
    * **GLB**: `asset.extras` JSON fields in the glTF binary.
@@ -76,6 +85,8 @@ Crafted with **[Gemini 3.7](https://blog.google/technology/google-deepmind/gemin
 | File | Role |
 |---|---|
 | `MainScreen.kt` | Compose UI, CameraX analyzer, sensor listener, orbital gesture handler, dual floating cards, fullscreen overlays, GPS, export |
+| `ThermalCalibrationManager.kt` | 4-corner perspective transform, `setPolyToPoly` homography, JSON serialization & persistent calibration storage |
+| `ThermalCalibrationOverlay.kt` | Interactive full-screen calibration UI, draggable corner handles (A/B/C/D), neon guide lines, rotation & opacity controls |
 | `MogeInterpreter.kt` | TFLite model loading, `runForMultipleInputsOutputs`, NIO buffer management |
 | `GLPointRenderer.kt` | OpenGL ES 2.0 renderer; `gravityAlignMatrix`, `resetAngles()`, turntable rotation |
 | `ThermalCameraManager.kt` | Thermal UVC capture manager, radiometric frame decoding, Celsius conversions, and 90° upright portrait rotation |

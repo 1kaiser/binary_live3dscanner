@@ -397,6 +397,12 @@ fun MainScreen(
     var isThermalEnabled by remember { mutableStateOf(false) }
     var lastThermalBitmap by remember { mutableStateOf<AndroidBitmap?>(null) }
 
+    // 4-Corner Perspective Calibration States
+    var isCalibrationMode by remember { mutableStateOf(false) }
+    var activeCalibration by remember { mutableStateOf(ThermalCalibrationManager.getActiveCalibration(context)) }
+    val activeCalibrationRef = remember { java.util.concurrent.atomic.AtomicReference(activeCalibration) }
+    LaunchedEffect(activeCalibration) { activeCalibrationRef.set(activeCalibration) }
+
     LaunchedEffect(isFlashlightOn) {
         cameraInstance?.cameraControl?.enableTorch(isFlashlightOn)
     }
@@ -714,6 +720,27 @@ fun MainScreen(
                     }
                 )
             }
+            // Row 4: 4-Corner Perspective Calibration
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(top = 2.dp)
+            ) {
+                Text(
+                    text = if (isCalibrationMode) "🎯  Calibrating..." else "🎯  4-Corner Calibrate",
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 9.sp,
+                    color = if (isCalibrationMode) Color(0xFF00E5FF) else Color(0xFF1A73E8),
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.clickable {
+                        if (!isThermalEnabled) {
+                            isThermalEnabled = true
+                            thermalManager.startStreaming()
+                        }
+                        isCalibrationMode = !isCalibrationMode
+                    }
+                )
+            }
         }
 
         // 3. Play/Pause Continuous Scanning Mode (top-right overlay)
@@ -875,13 +902,13 @@ fun MainScreen(
                 }
             }
 
-            // BOTTOM BOX: Camera Feed Live (Separated floating card, or fullscreen)
-            val isCameraFullscreen = (fullscreenMode == FullscreenMode.CAMERA)
+            // BOTTOM BOX: Camera Feed Live (Separated floating card, or fullscreen / calibration mode)
+            val isCameraFullscreen = (fullscreenMode == FullscreenMode.CAMERA) || isCalibrationMode
             Box(
                 modifier = if (isCameraFullscreen) {
                     Modifier
                         .fillMaxSize()
-                        .zIndex(200f)
+                        .zIndex(if (isCalibrationMode) 300f else 200f)
                         .background(Color.Black)
                 } else {
                     Modifier
@@ -968,7 +995,12 @@ fun MainScreen(
                                                          }
                                                          val thermalBmp = if (isThermalEnabled) lastThermalBitmap else null
                                                          val colorBitmap = if (thermalBmp != null) {
-                                                             Bitmap.createScaledBitmap(thermalBmp, rotatedBitmap.width, rotatedBitmap.height, true)
+                                                             ThermalCalibrationManager.createFusedColorBitmap(
+                                                                 rgbBitmap = rotatedBitmap,
+                                                                 thermalBitmap = thermalBmp,
+                                                                 calibration = activeCalibrationRef.get(),
+                                                                 alpha = 1.0f
+                                                             )
                                                          } else {
                                                              rotatedBitmap
                                                          }
@@ -1047,37 +1079,51 @@ fun MainScreen(
                     modifier = Modifier.fillMaxSize()
                 )
 
-                // Fullscreen Expand/Exit Button (Top-Left, matching diagram)
-                IconButton(
-                    onClick = { 
-                        fullscreenMode = if (isCameraFullscreen) FullscreenMode.NONE else FullscreenMode.CAMERA 
-                    },
-                    modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .padding(if (isCameraFullscreen) 16.dp else 6.dp)
-                        .size(if (isCameraFullscreen) 36.dp else 26.dp)
-                        .background(Color.Black.copy(alpha = 0.7f), CircleShape)
-                ) {
-                    if (isCameraFullscreen) {
-                        FullscreenExitIcon(color = Color.White)
-                    } else {
-                        FullscreenExpandIcon(color = Color.White)
+                if (isCalibrationMode) {
+                    ThermalCalibrationInteractiveOverlay(
+                        liveThermalBitmap = thermalManager.liveThermalBitmap.value,
+                        initialCalibration = activeCalibration,
+                        onSaveAndClose = { newCal ->
+                            activeCalibration = newCal
+                            isCalibrationMode = false
+                        },
+                        onClose = {
+                            isCalibrationMode = false
+                        }
+                    )
+                } else {
+                    // Fullscreen Expand/Exit Button (Top-Left, matching diagram)
+                    IconButton(
+                        onClick = { 
+                            fullscreenMode = if (isCameraFullscreen) FullscreenMode.NONE else FullscreenMode.CAMERA 
+                        },
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .padding(if (isCameraFullscreen) 16.dp else 6.dp)
+                            .size(if (isCameraFullscreen) 36.dp else 26.dp)
+                            .background(Color.Black.copy(alpha = 0.7f), CircleShape)
+                    ) {
+                        if (isCameraFullscreen) {
+                            FullscreenExitIcon(color = Color.White)
+                        } else {
+                            FullscreenExpandIcon(color = Color.White)
+                        }
                     }
-                }
 
-                // Status Badge (Bottom-Start)
-                Text(
-                    text = "LIVE",
-                    fontSize = 8.sp,
-                    fontFamily = FontFamily.Monospace,
-                    color = Color.Red,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier
-                        .align(Alignment.BottomStart)
-                        .padding(4.dp)
-                        .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(2.dp))
-                        .padding(horizontal = 4.dp, vertical = 2.dp)
-                )
+                    // Status Badge (Bottom-Start)
+                    Text(
+                        text = "LIVE",
+                        fontSize = 8.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = Color.Red,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .padding(4.dp)
+                            .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(2.dp))
+                            .padding(horizontal = 4.dp, vertical = 2.dp)
+                    )
+                }
             }
         }
 
