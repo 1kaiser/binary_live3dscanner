@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <script type="module" src="model-viewer.min.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body, html {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #F7F6F2;
+            font-family: monospace;
+        }
+        model-viewer {
+            width: 100%;
+            height: 100%;
+            --poster-color: transparent;
+            background-color: #F7F6F2;
+        }
+    </style>
+</head>
+<body>
+    <model-viewer 
+        id="mainViewer"
+        camera-controls 
+        camera-orbit="0deg 75deg 105%"
+        shadow-intensity="1" 
+        interaction-prompt="auto"
+        ar 
+        ar-modes="scene-viewer webxr quick-look"
+        alt="3D Reconstructed Model">
+    </model-viewer>
+
+    <script>
+        window.loadModelBase64 = function(base64Data) {
+            const viewer = document.getElementById('mainViewer');
+            viewer.src = 'data:model/gltf-binary;base64,' + base64Data;
+        };
+
+        window.resetCamera = function() {
+            const viewer = document.getElementById('mainViewer');
+            viewer.cameraOrbit = '0deg 75deg 105%';
+        };
+    </script>
+</body>
+</html>

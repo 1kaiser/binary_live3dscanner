@@ -1446,31 +1446,108 @@ fun MainScreen(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Color(0xFF121212))
+                    .background(Color(0xFFF7F6F2))
             ) {
                 AndroidView(
                     factory = { ctx ->
                         android.webkit.WebView(ctx).apply {
                             settings.javaScriptEnabled = true
                             settings.domStorageEnabled = true
+                            settings.allowFileAccess = true
+                            settings.allowContentAccess = true
+                            settings.allowFileAccessFromFileURLs = true
+                            settings.allowUniversalAccessFromFileURLs = true
                             settings.loadWithOverviewMode = true
                             settings.useWideViewPort = true
+                            webChromeClient = android.webkit.WebChromeClient()
                             webViewClient = android.webkit.WebViewClient()
                             loadDataWithBaseURL("https://ajax.googleapis.com", getModelViewerHtml(modelBase64), "text/html", "utf-8", null)
                         }
                     },
+                    update = { webView ->
+                        webView.loadDataWithBaseURL("https://ajax.googleapis.com", getModelViewerHtml(modelBase64), "text/html", "utf-8", null)
+                    },
                     modifier = Modifier.fillMaxSize()
                 )
 
-                // Close Button in top-right
-                Button(
-                    onClick = { isViewingModel = false },
+                // Top Bar in <model-viewer> overlay
+                Row(
                     modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(16.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color.Black.copy(alpha = 0.6f))
+                        .fillMaxWidth()
+                        .statusBarsPadding()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(text = "Close", color = Color.White, fontFamily = FontFamily.Monospace)
+                    // Mode Switcher inside model-viewer
+                    if (lastTripleResult != null) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .background(Color.White.copy(alpha = 0.9f), RoundedCornerShape(8.dp))
+                                .border(1.dp, Color(0xFFE0E0E0), RoundedCornerShape(8.dp))
+                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                        ) {
+                            Text(
+                                text = "🌈 Fused",
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (activeColorMode == PointCloudColorMode.FUSED) Color(0xFF00E5FF) else Color.Gray,
+                                modifier = Modifier.clickable {
+                                    activeColorMode = PointCloudColorMode.FUSED
+                                    val triple = lastTripleResult
+                                    if (triple != null) {
+                                        val glb = exportGlb(triple.fused.first, triple.fused.second)
+                                        modelBase64 = android.util.Base64.encodeToString(glb, android.util.Base64.NO_WRAP)
+                                    }
+                                }
+                            )
+                            Text(
+                                text = "📷 RGB",
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (activeColorMode == PointCloudColorMode.RGB) Color(0xFF4CAF50) else Color.Gray,
+                                modifier = Modifier.clickable {
+                                    activeColorMode = PointCloudColorMode.RGB
+                                    val triple = lastTripleResult
+                                    if (triple != null) {
+                                        val glb = exportGlb(triple.rgb.first, triple.rgb.second)
+                                        modelBase64 = android.util.Base64.encodeToString(glb, android.util.Base64.NO_WRAP)
+                                    }
+                                }
+                            )
+                            Text(
+                                text = "🌡️ Thermal",
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 9.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (activeColorMode == PointCloudColorMode.THERMAL) Color(0xFFFF5252) else Color.Gray,
+                                modifier = Modifier.clickable {
+                                    activeColorMode = PointCloudColorMode.THERMAL
+                                    val triple = lastTripleResult
+                                    if (triple != null) {
+                                        val glb = exportGlb(triple.thermal.first, triple.thermal.second)
+                                        modelBase64 = android.util.Base64.encodeToString(glb, android.util.Base64.NO_WRAP)
+                                    }
+                                }
+                            )
+                        }
+                    } else {
+                        Spacer(modifier = Modifier.weight(1f))
+                    }
+
+                    // Close Button
+                    IconButton(
+                        onClick = { isViewingModel = false },
+                        modifier = Modifier
+                            .size(36.dp)
+                            .background(Color.Black.copy(alpha = 0.75f), CircleShape)
+                    ) {
+                        FullscreenExitIcon(color = Color.White)
+                    }
                 }
             }
         }
@@ -1875,23 +1952,33 @@ private fun writeRotationFile(datasetDir: java.io.File, yaw: Float) {
 private fun getModelViewerHtml(base64Data: String): String {
     return """
         <!DOCTYPE html>
-        <html>
+        <html lang="en">
         <head>
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
             <script type="module" src="https://ajax.googleapis.com/ajax/libs/model-viewer/3.5.0/model-viewer.min.js"></script>
             <style>
-                body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #121212; }
-                model-viewer { width: 100%; height: 100%; --poster-color: transparent; }
+                * { box-sizing: border-box; margin: 0; padding: 0; }
+                body, html { width: 100%; height: 100%; overflow: hidden; background-color: #F7F6F2; }
+                model-viewer {
+                    width: 100%;
+                    height: 100%;
+                    --poster-color: transparent;
+                    background-color: #F7F6F2;
+                }
             </style>
         </head>
         <body>
             <model-viewer 
+                id="mainViewer"
                 src="data:model/gltf-binary;base64,$base64Data" 
                 camera-controls 
-                auto-rotate 
+                camera-orbit="0deg 75deg 105%"
                 shadow-intensity="1" 
                 interaction-prompt="auto"
-                style="background-color: #121212;">
+                ar 
+                ar-modes="scene-viewer webxr quick-look"
+                alt="3D Reconstructed Model">
             </model-viewer>
         </body>
         </html>
