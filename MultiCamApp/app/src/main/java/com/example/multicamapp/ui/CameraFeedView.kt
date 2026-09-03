@@ -323,7 +323,7 @@ fun configureTextureViewTransform(
         // Base is -90 at ROTATION_90 (1) and +90 at ROTATION_270 (3)
         // Front camera (sensor 270) has opposite angular direction from back camera (sensor 90)
         val baseDegrees = (90 * (displayRotation - 2)).toFloat()
-        val rotDegrees = if (isFront) -baseDegrees else baseDegrees
+        val rotDegrees = if (isFront) -baseDegrees + 180f else baseDegrees
         matrix.postRotate(rotDegrees, centerX, centerY)
     } else if (android.view.Surface.ROTATION_180 == displayRotation) {
         matrix.postRotate(180f, centerX, centerY)
