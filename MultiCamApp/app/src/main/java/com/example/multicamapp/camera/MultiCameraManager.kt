@@ -51,6 +51,9 @@ class MultiCameraManager(private val context: Context) {
     // Current resolution preset
     val currentResolutionPreset = mutableStateOf(ResolutionPreset.HD_720P)
 
+    // Hardware (GPU/ISP) acceleration toggle
+    val isHwAccelerationEnabled = mutableStateOf(true)
+
     // Active sessions
     private val activeDevices = ConcurrentHashMap<String, CameraDevice>()
     private val activeSessions = ConcurrentHashMap<String, CameraCaptureSession>()
@@ -199,6 +202,13 @@ class MultiCameraManager(private val context: Context) {
             closeCamera(cameraId)
         } else {
             current.add(cameraId)
+            val tv = activeTextureViews[cameraId]
+            val st = tv?.surfaceTexture
+            if (st != null) {
+                cameraHandler?.postDelayed({
+                    openCamera(cameraId, st)
+                }, 300)
+            }
         }
         selectedCameraIds.value = current
     }
@@ -207,10 +217,55 @@ class MultiCameraManager(private val context: Context) {
         if (currentResolutionPreset.value == preset) return
         currentResolutionPreset.value = preset
 
-        // Restart active camera streams with new resolution
+        // Stagger restarts so ISP doesn't hit concurrent open race condition
         val activeIds = selectedCameraIds.value.toList()
         for (id in activeIds) {
-            restartCameraStream(id)
+            closeCamera(id)
+        }
+        activeIds.forEachIndexed { index, id ->
+            val tv = activeTextureViews[id]
+            val st = tv?.surfaceTexture
+            if (st != null) {
+                cameraHandler?.postDelayed({
+                    openCamera(id, st)
+                }, 400L + index * 350L)
+            }
+        }
+    }
+
+    fun toggleHwAcceleration(enabled: Boolean) {
+        isHwAccelerationEnabled.value = enabled
+        val handler = cameraHandler ?: return
+        handler.post {
+            for ((id, session) in activeSessions) {
+                val camera = activeDevices[id] ?: continue
+                val surface = activeSurfaces[id] ?: continue
+                try {
+                    val builder = camera.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
+                        addTarget(surface)
+                        set(CaptureRequest.CONTROL_MODE, CameraMetadata.CONTROL_MODE_AUTO)
+                        set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
+                        applyHwAcceleration(this, enabled)
+                    }
+                    session.setRepeatingRequest(builder.build(), null, handler)
+                    Log.d(TAG, "Updated HW acceleration on camera $id: $enabled")
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to update HW acceleration for camera $id", e)
+                }
+            }
+        }
+    }
+
+    private fun applyHwAcceleration(builder: CaptureRequest.Builder, enabled: Boolean) {
+        if (enabled) {
+            builder.set(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_ON)
+            builder.set(CaptureRequest.EDGE_MODE, CameraMetadata.EDGE_MODE_FAST)
+            builder.set(CaptureRequest.NOISE_REDUCTION_MODE, CameraMetadata.NOISE_REDUCTION_MODE_FAST)
+            builder.set(CaptureRequest.HOT_PIXEL_MODE, CameraMetadata.HOT_PIXEL_MODE_FAST)
+        } else {
+            builder.set(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_OFF)
+            builder.set(CaptureRequest.EDGE_MODE, CameraMetadata.EDGE_MODE_OFF)
+            builder.set(CaptureRequest.NOISE_REDUCTION_MODE, CameraMetadata.NOISE_REDUCTION_MODE_OFF)
         }
     }
 
@@ -340,6 +395,7 @@ class MultiCameraManager(private val context: Context) {
                 addTarget(surface)
                 set(CaptureRequest.CONTROL_MODE, CameraMetadata.CONTROL_MODE_AUTO)
                 set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
+                applyHwAcceleration(this, isHwAccelerationEnabled.value)
             }
 
             @Suppress("DEPRECATION")
@@ -387,10 +443,26 @@ class MultiCameraManager(private val context: Context) {
     fun restartCameraStream(cameraId: String) {
         val textureView = activeTextureViews[cameraId] ?: return
         val surfaceTexture = textureView.surfaceTexture ?: return
-        closeCamera(cameraId)
-        cameraHandler?.postDelayed({
-            openCamera(cameraId, surfaceTexture)
-        }, 300)
+        if (cameraId == "1" && activeDevices.containsKey("0")) {
+            // MediaTek Dimensity HAL requires front camera to connect first to split ISP bandwidth
+            val backTv = activeTextureViews["0"]
+            val backSt = backTv?.surfaceTexture
+            closeCamera("0")
+            closeCamera("1")
+            cameraHandler?.postDelayed({
+                openCamera("1", surfaceTexture)
+                if (backSt != null) {
+                    cameraHandler?.postDelayed({
+                        openCamera("0", backSt)
+                    }, 400)
+                }
+            }, 350)
+        } else {
+            closeCamera(cameraId)
+            cameraHandler?.postDelayed({
+                openCamera(cameraId, surfaceTexture)
+            }, 350)
+        }
     }
 
     fun closeCamera(cameraId: String) {

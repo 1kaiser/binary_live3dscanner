@@ -57,9 +57,17 @@ fun MultiCamScreen(
     val currentPreset by cameraManager.currentResolutionPreset
     val concurrentSets by cameraManager.concurrentCameraSets
 
-    var layoutMode by remember { mutableStateOf(ViewLayoutMode.SPLIT_VERTICAL) }
+    val configuration = androidx.compose.ui.platform.LocalConfiguration.current
+    val isLandscape = configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+
+    var layoutMode by remember { mutableStateOf(ViewLayoutMode.AUTO) }
     var focusedFullscreenCameraId by remember { mutableStateOf<String?>(null) }
     var showDiagnosticsDialog by remember { mutableStateOf(false) }
+
+    val effectiveLayout = when (layoutMode) {
+        ViewLayoutMode.AUTO -> if (isLandscape) ViewLayoutMode.SPLIT_VERTICAL else ViewLayoutMode.SPLIT_HORIZONTAL
+        else -> layoutMode
+    }
 
     // Floating card states (for FLOATING_PIP mode, matching MoGe3DScanner)
     var pipOffset by remember { mutableStateOf(Offset(0f, 0f)) }
@@ -118,7 +126,7 @@ fun MultiCamScreen(
                 )
             }
         } else {
-            when (layoutMode) {
+            when (effectiveLayout) {
                 ViewLayoutMode.SPLIT_VERTICAL -> {
                     // Left / Right split
                     Row(
@@ -219,6 +227,7 @@ fun MultiCamScreen(
                         }
                     }
                 }
+                else -> {}
             }
         }
 
@@ -299,6 +308,33 @@ fun MultiCamScreen(
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = if (gpsOn) Color.White else Color.LightGray,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+                    }
+
+                    // HW Acceleration (GPU/ISP) Toggle Chip
+                    val hwAccelOn = cameraManager.isHwAccelerationEnabled.value
+                    Surface(
+                        shape = RoundedCornerShape(20.dp),
+                        color = if (hwAccelOn) Color(0xFF004D40) else Color(0xFF2C2C2C),
+                        border = androidx.compose.foundation.BorderStroke(
+                            1.dp,
+                            if (hwAccelOn) Color(0xFF00E676) else Color.Gray.copy(alpha = 0.5f)
+                        ),
+                        modifier = Modifier.clickable {
+                            cameraManager.toggleHwAcceleration(!hwAccelOn)
+                        }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = if (hwAccelOn) "⚡ GPU/ISP" else "⚡ HW OFF",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (hwAccelOn) Color(0xFF69F0AE) else Color.LightGray,
                                 fontFamily = FontFamily.Monospace
                             )
                         }
@@ -457,6 +493,7 @@ fun MultiCamScreen(
                                     videoRecorder.startRecording(
                                         bitmapsProvider = getBitmapFrames,
                                         location = locationManager.currentLocation.value,
+                                        isLandscape = isLandscape,
                                         onSuccess = { statusMessage = "Recording started" },
                                         onError = { err -> statusMessage = "Record error: $err" }
                                     )
@@ -517,6 +554,7 @@ fun MultiCamScreen(
                                             context = context,
                                             cameraFrames = frames,
                                             location = locationManager.currentLocation.value,
+                                            isLandscape = isLandscape,
                                             onProgress = { statusMessage = it }
                                         )
                                         statusMessage = "Saved ${saved.size} photos to Pictures/MultiCam"

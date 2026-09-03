@@ -112,6 +112,15 @@ fun CameraFeedView(
                             textAlign = TextAlign.Center,
                             fontFamily = FontFamily.Monospace
                         )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Button(
+                            onClick = { cameraManager.restartCameraStream(cameraInfo.cameraId) },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC62828)),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                            shape = RoundedCornerShape(6.dp)
+                        ) {
+                            Text("Retry Stream", fontSize = 9.sp, color = Color.White, fontFamily = FontFamily.Monospace)
+                        }
                     }
                 }
             }

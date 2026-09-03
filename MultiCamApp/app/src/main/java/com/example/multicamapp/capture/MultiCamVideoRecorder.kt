@@ -65,14 +65,15 @@ class MultiCamVideoRecorder(private val context: Context) {
     fun startRecording(
         bitmapsProvider: () -> List<Pair<String, Bitmap>>,
         location: Location?,
+        isLandscape: Boolean = true,
         onSuccess: (String) -> Unit,
         onError: (String) -> Unit
     ) {
         if (isRecording.value) return
 
         try {
-            val width = 1280
-            val height = 720
+            val width = if (isLandscape) 1280 else 720
+            val height = if (isLandscape) 720 else 1280
             val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
             val tempDir = context.cacheDir
             tempOutputFile = File(tempDir, "temp_rec_$timestamp.mp4")
@@ -137,44 +138,77 @@ class MultiCamVideoRecorder(private val context: Context) {
                             val frames = bitmapsProvider()
 
                             if (frames.isNotEmpty()) {
-                                when (frames.size) {
-                                    1 -> {
-                                        val (name, bmp) = frames[0]
-                                        dstRect.set(0, 0, width, height)
-                                        canvas.drawBitmap(bmp, null, dstRect, null)
-                                        drawCameraLabel(canvas, name, 20f, 40f)
+                                if (isLandscape) {
+                                    // Landscape: Side by Side
+                                    when (frames.size) {
+                                        1 -> {
+                                            val (name, bmp) = frames[0]
+                                            dstRect.set(0, 0, width, height)
+                                            canvas.drawBitmap(bmp, null, dstRect, null)
+                                            drawCameraLabel(canvas, name, 20f, 40f)
+                                        }
+                                        2 -> {
+                                            val halfW = width / 2
+                                            val (name1, bmp1) = frames[0]
+                                            dstRect.set(0, 0, halfW, height)
+                                            canvas.drawBitmap(bmp1, null, dstRect, null)
+                                            drawCameraLabel(canvas, name1, 20f, 40f)
+
+                                            val (name2, bmp2) = frames[1]
+                                            dstRect.set(halfW, 0, width, height)
+                                            canvas.drawBitmap(bmp2, null, dstRect, null)
+                                            drawCameraLabel(canvas, name2, halfW + 20f, 40f)
+                                        }
+                                        else -> {
+                                            val halfW = width / 2
+                                            val halfH = height / 2
+
+                                            val (name1, bmp1) = frames[0]
+                                            dstRect.set(0, 0, halfW, height)
+                                            canvas.drawBitmap(bmp1, null, dstRect, null)
+                                            drawCameraLabel(canvas, name1, 20f, 40f)
+
+                                            val (name2, bmp2) = frames[1]
+                                            dstRect.set(halfW, 0, width, halfH)
+                                            canvas.drawBitmap(bmp2, null, dstRect, null)
+                                            drawCameraLabel(canvas, name2, halfW + 20f, 40f)
+
+                                            val (name3, bmp3) = frames[2]
+                                            dstRect.set(halfW, halfH, width, height)
+                                            canvas.drawBitmap(bmp3, null, dstRect, null)
+                                            drawCameraLabel(canvas, name3, halfW + 20f, halfH + 40f)
+                                        }
                                     }
-                                    2 -> {
-                                        val halfW = width / 2
-                                        val (name1, bmp1) = frames[0]
-                                        dstRect.set(0, 0, halfW, height)
-                                        canvas.drawBitmap(bmp1, null, dstRect, null)
-                                        drawCameraLabel(canvas, name1, 20f, 40f)
+                                } else {
+                                    // Portrait: Top and Bottom Stacked
+                                    when (frames.size) {
+                                        1 -> {
+                                            val (name, bmp) = frames[0]
+                                            dstRect.set(0, 0, width, height)
+                                            canvas.drawBitmap(bmp, null, dstRect, null)
+                                            drawCameraLabel(canvas, name, 20f, 40f)
+                                        }
+                                        2 -> {
+                                            val halfH = height / 2
+                                            val (name1, bmp1) = frames[0]
+                                            dstRect.set(0, 0, width, halfH)
+                                            canvas.drawBitmap(bmp1, null, dstRect, null)
+                                            drawCameraLabel(canvas, name1, 20f, 40f)
 
-                                        val (name2, bmp2) = frames[1]
-                                        dstRect.set(halfW, 0, width, height)
-                                        canvas.drawBitmap(bmp2, null, dstRect, null)
-                                        drawCameraLabel(canvas, name2, halfW + 20f, 40f)
-                                    }
-                                    else -> {
-                                        // 3 or more cameras: Left half for Cam1, Right half split top/bottom for Cam2 & Cam3
-                                        val halfW = width / 2
-                                        val halfH = height / 2
-
-                                        val (name1, bmp1) = frames[0]
-                                        dstRect.set(0, 0, halfW, height)
-                                        canvas.drawBitmap(bmp1, null, dstRect, null)
-                                        drawCameraLabel(canvas, name1, 20f, 40f)
-
-                                        val (name2, bmp2) = frames[1]
-                                        dstRect.set(halfW, 0, width, halfH)
-                                        canvas.drawBitmap(bmp2, null, dstRect, null)
-                                        drawCameraLabel(canvas, name2, halfW + 20f, 40f)
-
-                                        val (name3, bmp3) = frames[2]
-                                        dstRect.set(halfW, halfH, width, height)
-                                        canvas.drawBitmap(bmp3, null, dstRect, null)
-                                        drawCameraLabel(canvas, name3, halfW + 20f, halfH + 40f)
+                                            val (name2, bmp2) = frames[1]
+                                            dstRect.set(0, halfH, width, height)
+                                            canvas.drawBitmap(bmp2, null, dstRect, null)
+                                            drawCameraLabel(canvas, name2, 20f, halfH + 40f)
+                                        }
+                                        else -> {
+                                            val thirdH = height / 3
+                                            for (i in 0 until minOf(3, frames.size)) {
+                                                val (name, bmp) = frames[i]
+                                                dstRect.set(0, i * thirdH, width, (i + 1) * thirdH)
+                                                canvas.drawBitmap(bmp, null, dstRect, null)
+                                                drawCameraLabel(canvas, name, 20f, (i * thirdH) + 40f)
+                                            }
+                                        }
                                     }
                                 }
                             }

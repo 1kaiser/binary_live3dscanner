@@ -31,6 +31,7 @@ object MultiCamPhotoCapture {
         context: Context,
         cameraFrames: List<Pair<String, Bitmap>>, // displayName to Bitmap
         location: Location?,
+        isLandscape: Boolean = true,
         onProgress: (String) -> Unit
     ): List<String> = withContext(Dispatchers.IO) {
         val savedFiles = mutableListOf<String>()
@@ -50,7 +51,7 @@ object MultiCamPhotoCapture {
 
         // 2. Generate and save composite photo if 2 or more cameras
         if (cameraFrames.size >= 2) {
-            val compositeBitmap = createCompositeBitmap(cameraFrames, location)
+            val compositeBitmap = createCompositeBitmap(cameraFrames, location, isLandscape)
             val compFileName = "multicam_composite_$timestamp.jpg"
             val compSaved = saveBitmapToMediaStore(context, compositeBitmap, compFileName, location)
             if (compSaved != null) {
@@ -63,10 +64,11 @@ object MultiCamPhotoCapture {
 
     private fun createCompositeBitmap(
         frames: List<Pair<String, Bitmap>>,
-        location: Location?
+        location: Location?,
+        isLandscape: Boolean
     ): Bitmap {
-        val totalWidth = 1920
-        val totalHeight = 1080
+        val totalWidth = if (isLandscape) 1920 else 1080
+        val totalHeight = if (isLandscape) 1080 else 1920
         val composite = Bitmap.createBitmap(totalWidth, totalHeight, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(composite)
         canvas.drawColor(Color.BLACK)
@@ -83,40 +85,64 @@ object MultiCamPhotoCapture {
 
         val dstRect = Rect()
 
-        when (frames.size) {
-            2 -> {
-                val halfW = totalWidth / 2
-                // Left
-                val (name1, bmp1) = frames[0]
-                dstRect.set(0, 0, halfW, totalHeight)
-                canvas.drawBitmap(bmp1, null, dstRect, null)
-                drawLabel(canvas, name1, 24f, 50f, textPaint, badgePaint)
+        if (isLandscape) {
+            // Landscape: Side by Side (Left & Right)
+            when (frames.size) {
+                2 -> {
+                    val halfW = totalWidth / 2
+                    val (name1, bmp1) = frames[0]
+                    dstRect.set(0, 0, halfW, totalHeight)
+                    canvas.drawBitmap(bmp1, null, dstRect, null)
+                    drawLabel(canvas, name1, 24f, 50f, textPaint, badgePaint)
 
-                // Right
-                val (name2, bmp2) = frames[1]
-                dstRect.set(halfW, 0, totalWidth, totalHeight)
-                canvas.drawBitmap(bmp2, null, dstRect, null)
-                drawLabel(canvas, name2, halfW + 24f, 50f, textPaint, badgePaint)
+                    val (name2, bmp2) = frames[1]
+                    dstRect.set(halfW, 0, totalWidth, totalHeight)
+                    canvas.drawBitmap(bmp2, null, dstRect, null)
+                    drawLabel(canvas, name2, halfW + 24f, 50f, textPaint, badgePaint)
+                }
+                else -> {
+                    val halfW = totalWidth / 2
+                    val halfH = totalHeight / 2
+                    val (name1, bmp1) = frames[0]
+                    dstRect.set(0, 0, halfW, totalHeight)
+                    canvas.drawBitmap(bmp1, null, dstRect, null)
+                    drawLabel(canvas, name1, 24f, 50f, textPaint, badgePaint)
+
+                    val (name2, bmp2) = frames[1]
+                    dstRect.set(halfW, 0, totalWidth, halfH)
+                    canvas.drawBitmap(bmp2, null, dstRect, null)
+                    drawLabel(canvas, name2, halfW + 24f, 50f, textPaint, badgePaint)
+
+                    val (name3, bmp3) = frames[2]
+                    dstRect.set(halfW, halfH, totalWidth, totalHeight)
+                    canvas.drawBitmap(bmp3, null, dstRect, null)
+                    drawLabel(canvas, name3, halfW + 24f, halfH + 50f, textPaint, badgePaint)
+                }
             }
-            else -> {
-                // 3 or more: 1 left half, 2 stacked on right
-                val halfW = totalWidth / 2
-                val halfH = totalHeight / 2
+        } else {
+            // Portrait: Top and Bottom (Stacked)
+            when (frames.size) {
+                2 -> {
+                    val halfH = totalHeight / 2
+                    val (name1, bmp1) = frames[0]
+                    dstRect.set(0, 0, totalWidth, halfH)
+                    canvas.drawBitmap(bmp1, null, dstRect, null)
+                    drawLabel(canvas, name1, 24f, 50f, textPaint, badgePaint)
 
-                val (name1, bmp1) = frames[0]
-                dstRect.set(0, 0, halfW, totalHeight)
-                canvas.drawBitmap(bmp1, null, dstRect, null)
-                drawLabel(canvas, name1, 24f, 50f, textPaint, badgePaint)
-
-                val (name2, bmp2) = frames[1]
-                dstRect.set(halfW, 0, totalWidth, halfH)
-                canvas.drawBitmap(bmp2, null, dstRect, null)
-                drawLabel(canvas, name2, halfW + 24f, 50f, textPaint, badgePaint)
-
-                val (name3, bmp3) = frames[2]
-                dstRect.set(halfW, halfH, totalWidth, totalHeight)
-                canvas.drawBitmap(bmp3, null, dstRect, null)
-                drawLabel(canvas, name3, halfW + 24f, halfH + 50f, textPaint, badgePaint)
+                    val (name2, bmp2) = frames[1]
+                    dstRect.set(0, halfH, totalWidth, totalHeight)
+                    canvas.drawBitmap(bmp2, null, dstRect, null)
+                    drawLabel(canvas, name2, 24f, halfH + 50f, textPaint, badgePaint)
+                }
+                else -> {
+                    val thirdH = totalHeight / 3
+                    for (i in 0 until minOf(3, frames.size)) {
+                        val (name, bmp) = frames[i]
+                        dstRect.set(0, i * thirdH, totalWidth, (i + 1) * thirdH)
+                        canvas.drawBitmap(bmp, null, dstRect, null)
+                        drawLabel(canvas, name, 24f, (i * thirdH) + 50f, textPaint, badgePaint)
+                    }
+                }
             }
         }
 
