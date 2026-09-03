@@ -84,7 +84,8 @@ fun CameraFeedView(
                                 viewWidth = w,
                                 viewHeight = h,
                                 displayRotation = displayRotation,
-                                streamSize = streamSize
+                                streamSize = streamSize,
+                                isFront = cameraInfo.lensType == com.example.multicamapp.camera.LensType.FRONT
                             )
                         }
                         cameraManager.registerTextureView(cameraInfo.cameraId, this)
@@ -96,7 +97,8 @@ fun CameraFeedView(
                         viewWidth = textureView.width,
                         viewHeight = textureView.height,
                         displayRotation = displayRotation,
-                        streamSize = streamSize
+                        streamSize = streamSize,
+                        isFront = cameraInfo.lensType == com.example.multicamapp.camera.LensType.FRONT
                     )
                 },
                 onRelease = {
@@ -280,7 +282,8 @@ fun configureTextureViewTransform(
     viewWidth: Int,
     viewHeight: Int,
     displayRotation: Int,
-    streamSize: android.util.Size
+    streamSize: android.util.Size,
+    isFront: Boolean
 ) {
     if (viewWidth == 0 || viewHeight == 0) return
     val matrix = android.graphics.Matrix()
@@ -293,11 +296,15 @@ fun configureTextureViewTransform(
         bufferRect.offset(centerX - bufferRect.centerX(), centerY - bufferRect.centerY())
         matrix.setRectToRect(viewRect, bufferRect, android.graphics.Matrix.ScaleToFit.FILL)
         val scale = Math.max(
-            viewHeight.toFloat() / streamSize.height,
-            viewWidth.toFloat() / streamSize.width
+            viewWidth.toFloat() / streamSize.height.toFloat(),
+            viewHeight.toFloat() / streamSize.width.toFloat()
         )
         matrix.postScale(scale, scale, centerX, centerY)
-        val rotDegrees = (90 * (displayRotation - 2)).toFloat()
+        // Standard Camera2 rotation:
+        // Base is -90 at ROTATION_90 (1) and +90 at ROTATION_270 (3)
+        // Front camera (sensor 270) has opposite angular direction from back camera (sensor 90)
+        val baseDegrees = (90 * (displayRotation - 2)).toFloat()
+        val rotDegrees = if (isFront) -baseDegrees else baseDegrees
         matrix.postRotate(rotDegrees, centerX, centerY)
     } else if (android.view.Surface.ROTATION_180 == displayRotation) {
         matrix.postRotate(180f, centerX, centerY)
