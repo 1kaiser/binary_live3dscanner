@@ -60,9 +60,23 @@ fun MultiCamScreen(
     val configuration = androidx.compose.ui.platform.LocalConfiguration.current
     val isLandscape = configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
 
-    var layoutMode by remember { mutableStateOf(ViewLayoutMode.AUTO) }
+    // Auto Split is NOT active by default. Default is based on orientation:
+    // Portrait -> Top / Bottom (SPLIT_HORIZONTAL)
+    // Landscape -> Side by Side (SPLIT_VERTICAL)
+    var layoutMode by remember {
+        mutableStateOf(if (isLandscape) ViewLayoutMode.SPLIT_VERTICAL else ViewLayoutMode.SPLIT_HORIZONTAL)
+    }
     var focusedFullscreenCameraId by remember { mutableStateOf<String?>(null) }
     var showDiagnosticsDialog by remember { mutableStateOf(false) }
+
+    // Adapt manual mode if orientation changes
+    androidx.compose.runtime.LaunchedEffect(isLandscape) {
+        if (layoutMode == ViewLayoutMode.SPLIT_VERTICAL && !isLandscape) {
+            layoutMode = ViewLayoutMode.SPLIT_HORIZONTAL
+        } else if (layoutMode == ViewLayoutMode.SPLIT_HORIZONTAL && isLandscape) {
+            layoutMode = ViewLayoutMode.SPLIT_VERTICAL
+        }
+    }
 
     val effectiveLayout = when (layoutMode) {
         ViewLayoutMode.AUTO -> if (isLandscape) ViewLayoutMode.SPLIT_VERTICAL else ViewLayoutMode.SPLIT_HORIZONTAL
@@ -342,6 +356,27 @@ fun MultiCamScreen(
                         }
                     }
 
+                    // CPU Multi-Core Chip
+                    Surface(
+                        shape = RoundedCornerShape(20.dp),
+                        color = Color(0xFF1A237E),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF536DFE)),
+                        modifier = Modifier.clickable { showDiagnosticsDialog = true }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "🧠 CPU: 8C",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color(0xFF8C9EFF),
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+                    }
+
                     // Diagnostics Button
                     IconButton(
                         onClick = { showDiagnosticsDialog = true },
@@ -375,7 +410,7 @@ fun MultiCamScreen(
                     fontWeight = FontWeight.Bold
                 )
 
-                for (cam in discoveredCameras) {
+                discoveredCameras.forEach { cam ->
                     val isSel = selectedCameraIds.contains(cam.cameraId)
                     FilterChip(
                         selected = isSel,
@@ -401,6 +436,20 @@ fun MultiCamScreen(
             Spacer(modifier = Modifier.height(4.dp))
 
             // Row 3: Layout switcher
+            // Rules:
+            // 1. Side by side is NOT required in portrait mode (only in landscape)
+            // 2. Both toggles (Top/Bottom & Side-by-Side) are NOT required when Auto Split is active
+            // 3. When Auto Split is not active (default), based on screen orientation the valid toggle is shown
+            val visibleModes = remember(layoutMode, isLandscape) {
+                if (layoutMode == ViewLayoutMode.AUTO) {
+                    listOf(ViewLayoutMode.AUTO, ViewLayoutMode.FLOATING_PIP)
+                } else if (isLandscape) {
+                    listOf(ViewLayoutMode.AUTO, ViewLayoutMode.SPLIT_VERTICAL, ViewLayoutMode.FLOATING_PIP)
+                } else {
+                    listOf(ViewLayoutMode.AUTO, ViewLayoutMode.SPLIT_HORIZONTAL, ViewLayoutMode.FLOATING_PIP)
+                }
+            }
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -413,13 +462,19 @@ fun MultiCamScreen(
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Bold
                 )
-                ViewLayoutMode.values().forEach { mode ->
+                visibleModes.forEach { mode ->
                     val active = layoutMode == mode
                     Surface(
                         shape = RoundedCornerShape(12.dp),
                         color = if (active) Color(0xFF1565C0) else Color(0xFF242424),
                         border = if (active) androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF64B5F6)) else null,
-                        modifier = Modifier.clickable { layoutMode = mode }
+                        modifier = Modifier.clickable {
+                            layoutMode = if (layoutMode == mode && mode == ViewLayoutMode.AUTO) {
+                                if (isLandscape) ViewLayoutMode.SPLIT_VERTICAL else ViewLayoutMode.SPLIT_HORIZONTAL
+                            } else {
+                                mode
+                            }
+                        }
                     ) {
                         Text(
                             text = mode.displayName,

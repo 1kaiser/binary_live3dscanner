@@ -48,6 +48,14 @@ fun CameraFeedView(
         streamSize.height.toFloat() / streamSize.width.toFloat() // 9:16
     }
 
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val displayRotation = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+        context.display?.rotation ?: android.view.Surface.ROTATION_0
+    } else {
+        @Suppress("DEPRECATION")
+        (context.getSystemService(android.content.Context.WINDOW_SERVICE) as android.view.WindowManager).defaultDisplay.rotation
+    }
+
     val cornerRadius = if (isFullscreen) 0.dp else 12.dp
     val shape = RoundedCornerShape(cornerRadius)
 
@@ -68,8 +76,28 @@ fun CameraFeedView(
             AndroidView(
                 factory = { ctx ->
                     TextureView(ctx).apply {
+                        addOnLayoutChangeListener { _, left, top, right, bottom, _, _, _, _ ->
+                            val w = right - left
+                            val h = bottom - top
+                            configureTextureViewTransform(
+                                textureView = this,
+                                viewWidth = w,
+                                viewHeight = h,
+                                displayRotation = displayRotation,
+                                streamSize = streamSize
+                            )
+                        }
                         cameraManager.registerTextureView(cameraInfo.cameraId, this)
                     }
+                },
+                update = { textureView ->
+                    configureTextureViewTransform(
+                        textureView = textureView,
+                        viewWidth = textureView.width,
+                        viewHeight = textureView.height,
+                        displayRotation = displayRotation,
+                        streamSize = streamSize
+                    )
                 },
                 onRelease = {
                     cameraManager.unregisterTextureView(cameraInfo.cameraId)
@@ -245,4 +273,34 @@ fun CenterCropContainer(
             }
         }
     }
+}
+
+fun configureTextureViewTransform(
+    textureView: TextureView,
+    viewWidth: Int,
+    viewHeight: Int,
+    displayRotation: Int,
+    streamSize: android.util.Size
+) {
+    if (viewWidth == 0 || viewHeight == 0) return
+    val matrix = android.graphics.Matrix()
+    val centerX = viewWidth / 2f
+    val centerY = viewHeight / 2f
+
+    val viewRect = android.graphics.RectF(0f, 0f, viewWidth.toFloat(), viewHeight.toFloat())
+    if (android.view.Surface.ROTATION_90 == displayRotation || android.view.Surface.ROTATION_270 == displayRotation) {
+        val bufferRect = android.graphics.RectF(0f, 0f, streamSize.height.toFloat(), streamSize.width.toFloat())
+        bufferRect.offset(centerX - bufferRect.centerX(), centerY - bufferRect.centerY())
+        matrix.setRectToRect(viewRect, bufferRect, android.graphics.Matrix.ScaleToFit.FILL)
+        val scale = Math.max(
+            viewHeight.toFloat() / streamSize.height,
+            viewWidth.toFloat() / streamSize.width
+        )
+        matrix.postScale(scale, scale, centerX, centerY)
+        val rotDegrees = (90 * (displayRotation - 2)).toFloat()
+        matrix.postRotate(rotDegrees, centerX, centerY)
+    } else if (android.view.Surface.ROTATION_180 == displayRotation) {
+        matrix.postRotate(180f, centerX, centerY)
+    }
+    textureView.setTransform(matrix)
 }
