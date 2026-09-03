@@ -290,8 +290,27 @@ fun configureTextureViewTransform(
     val centerX = viewWidth / 2f
     val centerY = viewHeight / 2f
 
-    val viewRect = android.graphics.RectF(0f, 0f, viewWidth.toFloat(), viewHeight.toFloat())
-    if (android.view.Surface.ROTATION_90 == displayRotation || android.view.Surface.ROTATION_270 == displayRotation) {
+    val is480p = streamSize.width == 640 && streamSize.height == 480
+
+    if (displayRotation == android.view.Surface.ROTATION_0) {
+        if (is480p) {
+            // MediaTek HAL 4:3 (640x480) buffer orientation fix in portrait:
+            // Back camera requires +90 deg, front selfie requires -90 deg to be perfectly upright
+            val viewRect = android.graphics.RectF(0f, 0f, viewWidth.toFloat(), viewHeight.toFloat())
+            val bufferRect = android.graphics.RectF(0f, 0f, streamSize.height.toFloat(), streamSize.width.toFloat())
+            bufferRect.offset(centerX - bufferRect.centerX(), centerY - bufferRect.centerY())
+            matrix.setRectToRect(viewRect, bufferRect, android.graphics.Matrix.ScaleToFit.FILL)
+
+            val scale = Math.max(
+                viewWidth.toFloat() / streamSize.height.toFloat(),
+                viewHeight.toFloat() / streamSize.width.toFloat()
+            )
+            matrix.postScale(scale, scale, centerX, centerY)
+            val rotDegrees = if (isFront) -90f else 90f
+            matrix.postRotate(rotDegrees, centerX, centerY)
+        }
+    } else if (android.view.Surface.ROTATION_90 == displayRotation || android.view.Surface.ROTATION_270 == displayRotation) {
+        val viewRect = android.graphics.RectF(0f, 0f, viewWidth.toFloat(), viewHeight.toFloat())
         val bufferRect = android.graphics.RectF(0f, 0f, streamSize.height.toFloat(), streamSize.width.toFloat())
         bufferRect.offset(centerX - bufferRect.centerX(), centerY - bufferRect.centerY())
         matrix.setRectToRect(viewRect, bufferRect, android.graphics.Matrix.ScaleToFit.FILL)

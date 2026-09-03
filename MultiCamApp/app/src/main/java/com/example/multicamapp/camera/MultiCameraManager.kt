@@ -346,7 +346,9 @@ class MultiCameraManager(private val context: Context) {
 
         val targetSize = chooseOptimalSize(cameraId, currentResolutionPreset.value)
         surfaceTexture.setDefaultBufferSize(targetSize.width, targetSize.height)
-        val surface = activeSurfaces.computeIfAbsent(cameraId) { Surface(surfaceTexture) }
+        activeSurfaces.remove(cameraId)?.release()
+        val surface = Surface(surfaceTexture)
+        activeSurfaces[cameraId] = surface
 
         try {
             Log.d(TAG, "Requesting openCamera for ID: $cameraId with size ${targetSize.width}x${targetSize.height}")
