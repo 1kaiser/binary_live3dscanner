@@ -83,13 +83,20 @@ fun MultiCamScreen(
         discoveredCameras.filter { selectedCameraIds.contains(it.cameraId) }
     }
 
-    // Helper to grab bitmaps from active TextureViews
-    val getBitmapFrames = remember(cameraManager, activeCameras) {
+    // Helper to grab FULL uncropped bitmaps from active TextureViews
+    val getBitmapFrames = remember(cameraManager, activeCameras, isLandscape) {
         {
             activeCameras.mapNotNull { cam ->
                 val tv = cameraManager.getTextureView(cam.cameraId)
-                val bmp = tv?.bitmap
-                if (bmp != null) Pair(cam.displayName, bmp) else null
+                val streamSize = cameraManager.streamStatuses[cam.cameraId]?.activeSize
+                    ?: android.util.Size(1280, 720)
+                val (reqW, reqH) = if (isLandscape) {
+                    Pair(streamSize.width, streamSize.height)
+                } else {
+                    Pair(streamSize.height, streamSize.width)
+                }
+                val fullBmp = tv?.getBitmap(reqW, reqH) ?: tv?.bitmap
+                if (fullBmp != null) Pair(cam.displayName, fullBmp) else null
             }
         }
     }

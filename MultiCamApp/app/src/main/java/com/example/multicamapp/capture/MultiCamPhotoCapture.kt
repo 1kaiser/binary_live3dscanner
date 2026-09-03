@@ -92,12 +92,12 @@ object MultiCamPhotoCapture {
                     val halfW = totalWidth / 2
                     val (name1, bmp1) = frames[0]
                     dstRect.set(0, 0, halfW, totalHeight)
-                    canvas.drawBitmap(bmp1, null, dstRect, null)
+                    drawBitmapAspectFit(canvas, bmp1, dstRect)
                     drawLabel(canvas, name1, 24f, 50f, textPaint, badgePaint)
 
                     val (name2, bmp2) = frames[1]
                     dstRect.set(halfW, 0, totalWidth, totalHeight)
-                    canvas.drawBitmap(bmp2, null, dstRect, null)
+                    drawBitmapAspectFit(canvas, bmp2, dstRect)
                     drawLabel(canvas, name2, halfW + 24f, 50f, textPaint, badgePaint)
                 }
                 else -> {
@@ -105,17 +105,17 @@ object MultiCamPhotoCapture {
                     val halfH = totalHeight / 2
                     val (name1, bmp1) = frames[0]
                     dstRect.set(0, 0, halfW, totalHeight)
-                    canvas.drawBitmap(bmp1, null, dstRect, null)
+                    drawBitmapAspectFit(canvas, bmp1, dstRect)
                     drawLabel(canvas, name1, 24f, 50f, textPaint, badgePaint)
 
                     val (name2, bmp2) = frames[1]
                     dstRect.set(halfW, 0, totalWidth, halfH)
-                    canvas.drawBitmap(bmp2, null, dstRect, null)
+                    drawBitmapAspectFit(canvas, bmp2, dstRect)
                     drawLabel(canvas, name2, halfW + 24f, 50f, textPaint, badgePaint)
 
                     val (name3, bmp3) = frames[2]
                     dstRect.set(halfW, halfH, totalWidth, totalHeight)
-                    canvas.drawBitmap(bmp3, null, dstRect, null)
+                    drawBitmapAspectFit(canvas, bmp3, dstRect)
                     drawLabel(canvas, name3, halfW + 24f, halfH + 50f, textPaint, badgePaint)
                 }
             }
@@ -126,12 +126,12 @@ object MultiCamPhotoCapture {
                     val halfH = totalHeight / 2
                     val (name1, bmp1) = frames[0]
                     dstRect.set(0, 0, totalWidth, halfH)
-                    canvas.drawBitmap(bmp1, null, dstRect, null)
+                    drawBitmapAspectFit(canvas, bmp1, dstRect)
                     drawLabel(canvas, name1, 24f, 50f, textPaint, badgePaint)
 
                     val (name2, bmp2) = frames[1]
                     dstRect.set(0, halfH, totalWidth, totalHeight)
-                    canvas.drawBitmap(bmp2, null, dstRect, null)
+                    drawBitmapAspectFit(canvas, bmp2, dstRect)
                     drawLabel(canvas, name2, 24f, halfH + 50f, textPaint, badgePaint)
                 }
                 else -> {
@@ -139,7 +139,7 @@ object MultiCamPhotoCapture {
                     for (i in 0 until minOf(3, frames.size)) {
                         val (name, bmp) = frames[i]
                         dstRect.set(0, i * thirdH, totalWidth, (i + 1) * thirdH)
-                        canvas.drawBitmap(bmp, null, dstRect, null)
+                        drawBitmapAspectFit(canvas, bmp, dstRect)
                         drawLabel(canvas, name, 24f, (i * thirdH) + 50f, textPaint, badgePaint)
                     }
                 }
@@ -180,6 +180,22 @@ object MultiCamPhotoCapture {
         val width = textPaint.measureText(label) + 24f
         canvas.drawRoundRect(x - 8f, y - 34f, x + width, y + 12f, 8f, 8f, badgePaint)
         canvas.drawText(label, x + 4f, y, textPaint)
+    }
+
+    private fun drawBitmapAspectFit(canvas: Canvas, bitmap: Bitmap, dst: Rect) {
+        val bW = bitmap.width.toFloat()
+        val bH = bitmap.height.toFloat()
+        val dW = dst.width().toFloat()
+        val dH = dst.height().toFloat()
+
+        val scale = minOf(dW / bW, dH / bH)
+        val targetW = (bW * scale).toInt()
+        val targetH = (bH * scale).toInt()
+
+        val left = dst.left + (dst.width() - targetW) / 2
+        val top = dst.top + (dst.height() - targetH) / 2
+        val fitRect = Rect(left, top, left + targetW, top + targetH)
+        canvas.drawBitmap(bitmap, null, fitRect, Paint(Paint.FILTER_BITMAP_FLAG))
     }
 
     private fun saveBitmapToMediaStore(

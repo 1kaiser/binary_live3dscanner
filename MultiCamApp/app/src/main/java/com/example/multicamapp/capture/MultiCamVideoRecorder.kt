@@ -144,19 +144,19 @@ class MultiCamVideoRecorder(private val context: Context) {
                                         1 -> {
                                             val (name, bmp) = frames[0]
                                             dstRect.set(0, 0, width, height)
-                                            canvas.drawBitmap(bmp, null, dstRect, null)
+                                            drawBitmapAspectFit(canvas, bmp, dstRect)
                                             drawCameraLabel(canvas, name, 20f, 40f)
                                         }
                                         2 -> {
                                             val halfW = width / 2
                                             val (name1, bmp1) = frames[0]
                                             dstRect.set(0, 0, halfW, height)
-                                            canvas.drawBitmap(bmp1, null, dstRect, null)
+                                            drawBitmapAspectFit(canvas, bmp1, dstRect)
                                             drawCameraLabel(canvas, name1, 20f, 40f)
 
                                             val (name2, bmp2) = frames[1]
                                             dstRect.set(halfW, 0, width, height)
-                                            canvas.drawBitmap(bmp2, null, dstRect, null)
+                                            drawBitmapAspectFit(canvas, bmp2, dstRect)
                                             drawCameraLabel(canvas, name2, halfW + 20f, 40f)
                                         }
                                         else -> {
@@ -165,17 +165,17 @@ class MultiCamVideoRecorder(private val context: Context) {
 
                                             val (name1, bmp1) = frames[0]
                                             dstRect.set(0, 0, halfW, height)
-                                            canvas.drawBitmap(bmp1, null, dstRect, null)
+                                            drawBitmapAspectFit(canvas, bmp1, dstRect)
                                             drawCameraLabel(canvas, name1, 20f, 40f)
 
                                             val (name2, bmp2) = frames[1]
                                             dstRect.set(halfW, 0, width, halfH)
-                                            canvas.drawBitmap(bmp2, null, dstRect, null)
+                                            drawBitmapAspectFit(canvas, bmp2, dstRect)
                                             drawCameraLabel(canvas, name2, halfW + 20f, 40f)
 
                                             val (name3, bmp3) = frames[2]
                                             dstRect.set(halfW, halfH, width, height)
-                                            canvas.drawBitmap(bmp3, null, dstRect, null)
+                                            drawBitmapAspectFit(canvas, bmp3, dstRect)
                                             drawCameraLabel(canvas, name3, halfW + 20f, halfH + 40f)
                                         }
                                     }
@@ -185,19 +185,19 @@ class MultiCamVideoRecorder(private val context: Context) {
                                         1 -> {
                                             val (name, bmp) = frames[0]
                                             dstRect.set(0, 0, width, height)
-                                            canvas.drawBitmap(bmp, null, dstRect, null)
+                                            drawBitmapAspectFit(canvas, bmp, dstRect)
                                             drawCameraLabel(canvas, name, 20f, 40f)
                                         }
                                         2 -> {
                                             val halfH = height / 2
                                             val (name1, bmp1) = frames[0]
                                             dstRect.set(0, 0, width, halfH)
-                                            canvas.drawBitmap(bmp1, null, dstRect, null)
+                                            drawBitmapAspectFit(canvas, bmp1, dstRect)
                                             drawCameraLabel(canvas, name1, 20f, 40f)
 
                                             val (name2, bmp2) = frames[1]
                                             dstRect.set(0, halfH, width, height)
-                                            canvas.drawBitmap(bmp2, null, dstRect, null)
+                                            drawBitmapAspectFit(canvas, bmp2, dstRect)
                                             drawCameraLabel(canvas, name2, 20f, halfH + 40f)
                                         }
                                         else -> {
@@ -205,7 +205,7 @@ class MultiCamVideoRecorder(private val context: Context) {
                                             for (i in 0 until minOf(3, frames.size)) {
                                                 val (name, bmp) = frames[i]
                                                 dstRect.set(0, i * thirdH, width, (i + 1) * thirdH)
-                                                canvas.drawBitmap(bmp, null, dstRect, null)
+                                                drawBitmapAspectFit(canvas, bmp, dstRect)
                                                 drawCameraLabel(canvas, name, 20f, (i * thirdH) + 40f)
                                             }
                                         }
@@ -253,6 +253,22 @@ class MultiCamVideoRecorder(private val context: Context) {
         val width = textPaint.measureText(label) + 20f
         canvas.drawRoundRect(x - 6f, y - 24f, x + width, y + 8f, 6f, 6f, badgePaint)
         canvas.drawText(label, x + 4f, y, textPaint)
+    }
+
+    private fun drawBitmapAspectFit(canvas: Canvas, bitmap: Bitmap, dst: Rect) {
+        val bW = bitmap.width.toFloat()
+        val bH = bitmap.height.toFloat()
+        val dW = dst.width().toFloat()
+        val dH = dst.height().toFloat()
+
+        val scale = minOf(dW / bW, dH / bH)
+        val targetW = (bW * scale).toInt()
+        val targetH = (bH * scale).toInt()
+
+        val left = dst.left + (dst.width() - targetW) / 2
+        val top = dst.top + (dst.height() - targetH) / 2
+        val fitRect = Rect(left, top, left + targetW, top + targetH)
+        canvas.drawBitmap(bitmap, null, fitRect, Paint(Paint.FILTER_BITMAP_FLAG))
     }
 
     fun stopRecording(onFinished: (String?) -> Unit) {

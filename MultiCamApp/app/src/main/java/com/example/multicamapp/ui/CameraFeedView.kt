@@ -14,6 +14,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -36,6 +37,17 @@ fun CameraFeedView(
     modifier: Modifier = Modifier,
     isFloating: Boolean = false
 ) {
+    val configuration = androidx.compose.ui.platform.LocalConfiguration.current
+    val isLandscape = configuration.orientation == android.content.res.Configuration.ORIENTATION_LANDSCAPE
+
+    // Calculate natural camera stream aspect ratio (width / height when upright)
+    val streamSize = status.activeSize ?: android.util.Size(1280, 720)
+    val streamAspect = if (isLandscape) {
+        streamSize.width.toFloat() / streamSize.height.toFloat() // 16:9
+    } else {
+        streamSize.height.toFloat() / streamSize.width.toFloat() // 9:16
+    }
+
     val cornerRadius = if (isFullscreen) 0.dp else 12.dp
     val shape = RoundedCornerShape(cornerRadius)
 
@@ -48,18 +60,23 @@ fun CameraFeedView(
                 else Modifier
             )
     ) {
-        // 1. Android TextureView for hardware Camera2 streaming
-        AndroidView(
-            factory = { ctx ->
-                TextureView(ctx).apply {
-                    cameraManager.registerTextureView(cameraInfo.cameraId, this)
-                }
-            },
-            onRelease = {
-                cameraManager.unregisterTextureView(cameraInfo.cameraId)
-            },
+        // 1. Android TextureView centered and cropped without reshaping
+        CenterCropContainer(
+            aspectRatio = streamAspect,
             modifier = Modifier.fillMaxSize()
-        )
+        ) {
+            AndroidView(
+                factory = { ctx ->
+                    TextureView(ctx).apply {
+                        cameraManager.registerTextureView(cameraInfo.cameraId, this)
+                    }
+                },
+                onRelease = {
+                    cameraManager.unregisterTextureView(cameraInfo.cameraId)
+                },
+                modifier = Modifier.fillMaxSize()
+            )
+        }
 
         // 2. Status overlays (Starting, Error, or Offline)
         when (status.state) {
@@ -183,7 +200,49 @@ fun CameraFeedView(
                 .align(Alignment.BottomStart)
                 .padding(6.dp)
                 .background(Color.Black.copy(alpha = 0.75f), RoundedCornerShape(4.dp))
-                .padding(horizontal = 6.dp, vertical = 2.dp)
         )
+    }
+}
+
+@Composable
+fun CenterCropContainer(
+    aspectRatio: Float,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit
+) {
+    androidx.compose.ui.layout.Layout(
+        content = content,
+        modifier = modifier.clipToBounds()
+    ) { measurables, constraints ->
+        val containerWidth = constraints.maxWidth
+        val containerHeight = constraints.maxHeight
+
+        if (containerWidth == 0 || containerHeight == 0) {
+            return@Layout layout(0, 0) {}
+        }
+
+        val containerAspect = containerWidth.toFloat() / containerHeight.toFloat()
+        val (targetWidth, targetHeight) = if (containerAspect > aspectRatio) {
+            // Container is wider than aspect ratio: match width, expand height
+            val w = containerWidth
+            val h = (containerWidth / aspectRatio).toInt()
+            Pair(w, h)
+        } else {
+            // Container is taller than aspect ratio: match height, expand width
+            val h = containerHeight
+            val w = (containerHeight * aspectRatio).toInt()
+            Pair(w, h)
+        }
+
+        val childConstraints = androidx.compose.ui.unit.Constraints.fixed(targetWidth, targetHeight)
+        val placeables = measurables.map { it.measure(childConstraints) }
+
+        layout(containerWidth, containerHeight) {
+            val x = (containerWidth - targetWidth) / 2
+            val y = (containerHeight - targetHeight) / 2
+            placeables.forEach { placeable ->
+                placeable.place(x, y)
+            }
+        }
     }
 }
