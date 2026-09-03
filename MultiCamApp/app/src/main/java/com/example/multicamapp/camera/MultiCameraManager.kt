@@ -199,38 +199,43 @@ class MultiCameraManager(private val context: Context) {
         val current = selectedCameraIds.value.toMutableSet()
         if (current.contains(cameraId)) {
             current.remove(cameraId)
+            selectedCameraIds.value = current
             closeCamera(cameraId)
         } else {
             current.add(cameraId)
-            val tv = activeTextureViews[cameraId]
-            val st = tv?.surfaceTexture
-            if (st != null) {
-                cameraHandler?.postDelayed({
-                    openCamera(cameraId, st)
-                }, 300)
-            }
+            selectedCameraIds.value = current
+            reopenActiveStreams()
         }
-        selectedCameraIds.value = current
     }
 
     fun setResolutionPreset(preset: ResolutionPreset) {
         if (currentResolutionPreset.value == preset) return
         currentResolutionPreset.value = preset
+        reopenActiveStreams()
+    }
 
-        // Stagger restarts so ISP doesn't hit concurrent open race condition
-        val activeIds = selectedCameraIds.value.toList()
-        for (id in activeIds) {
-            closeCamera(id)
-        }
-        activeIds.forEachIndexed { index, id ->
+    fun restartCameraStream(cameraId: String) {
+        reopenActiveStreams()
+    }
+
+    private fun openSelectedCamerasConcurrently() {
+        val selected = selectedCameraIds.value
+        for (id in selected) {
             val tv = activeTextureViews[id]
             val st = tv?.surfaceTexture
-            if (st != null) {
-                cameraHandler?.postDelayed({
-                    openCamera(id, st)
-                }, 400L + index * 350L)
+            if (st != null && !activeDevices.containsKey(id)) {
+                openCamera(id, st)
             }
         }
+    }
+
+    private fun reopenActiveStreams() {
+        for (id in activeDevices.keys().toList()) {
+            closeCamera(id)
+        }
+        cameraHandler?.postDelayed({
+            openSelectedCamerasConcurrently()
+        }, 400)
     }
 
     fun toggleHwAcceleration(enabled: Boolean) {
@@ -243,39 +248,48 @@ class MultiCameraManager(private val context: Context) {
                 try {
                     val builder = camera.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
                         addTarget(surface)
-                        set(CaptureRequest.CONTROL_MODE, CameraMetadata.CONTROL_MODE_AUTO)
-                        set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
-                        applyHwAcceleration(this, enabled)
+                        applyHwAcceleration(id, this, enabled)
                     }
                     session.setRepeatingRequest(builder.build(), null, handler)
-                    Log.d(TAG, "Updated HW acceleration on camera $id: $enabled")
                 } catch (e: Exception) {
-                    Log.e(TAG, "Failed to update HW acceleration for camera $id", e)
+                    Log.w(TAG, "Failed to toggle HW acceleration for camera $id", e)
                 }
             }
         }
     }
 
-    private fun applyHwAcceleration(builder: CaptureRequest.Builder, enabled: Boolean) {
-        if (enabled) {
-            builder.set(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_ON)
-            builder.set(CaptureRequest.EDGE_MODE, CameraMetadata.EDGE_MODE_FAST)
-            builder.set(CaptureRequest.NOISE_REDUCTION_MODE, CameraMetadata.NOISE_REDUCTION_MODE_FAST)
-            builder.set(CaptureRequest.HOT_PIXEL_MODE, CameraMetadata.HOT_PIXEL_MODE_FAST)
-        } else {
-            builder.set(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_OFF)
-            builder.set(CaptureRequest.EDGE_MODE, CameraMetadata.EDGE_MODE_OFF)
-            builder.set(CaptureRequest.NOISE_REDUCTION_MODE, CameraMetadata.NOISE_REDUCTION_MODE_OFF)
+    private fun applyHwAcceleration(cameraId: String, builder: CaptureRequest.Builder, enabled: Boolean) {
+        try {
+            val chars = cameraManager.getCameraCharacteristics(cameraId)
+            val videoStabModes = chars.get(CameraCharacteristics.CONTROL_AVAILABLE_VIDEO_STABILIZATION_MODES) ?: intArrayOf()
+            if (enabled) {
+                if (videoStabModes.contains(CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_ON)) {
+                    builder.set(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_ON)
+                }
+                builder.set(CaptureRequest.EDGE_MODE, CameraMetadata.EDGE_MODE_FAST)
+                builder.set(CaptureRequest.NOISE_REDUCTION_MODE, CameraMetadata.NOISE_REDUCTION_MODE_FAST)
+            } else {
+                builder.set(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_OFF)
+                builder.set(CaptureRequest.EDGE_MODE, CameraMetadata.EDGE_MODE_OFF)
+                builder.set(CaptureRequest.NOISE_REDUCTION_MODE, CameraMetadata.NOISE_REDUCTION_MODE_OFF)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to apply HW acceleration to camera $cameraId", e)
         }
     }
 
     fun registerTextureView(cameraId: String, textureView: TextureView) {
         activeTextureViews[cameraId] = textureView
-        if (textureView.isAvailable) {
-            onTextureAvailable(cameraId, textureView.surfaceTexture!!, textureView.width, textureView.height)
+        if (textureView.isAvailable && textureView.surfaceTexture != null) {
+            val st = textureView.surfaceTexture!!
+            activeSurfaces[cameraId]?.release()
+            activeSurfaces[cameraId] = Surface(st)
+            onTextureAvailable(cameraId, st, textureView.width, textureView.height)
         }
         textureView.surfaceTextureListener = object : TextureView.SurfaceTextureListener {
             override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) {
+                activeSurfaces[cameraId]?.release()
+                activeSurfaces[cameraId] = Surface(surface)
                 onTextureAvailable(cameraId, surface, width, height)
             }
 
@@ -285,6 +299,7 @@ class MultiCameraManager(private val context: Context) {
 
             override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
                 closeCamera(cameraId)
+                activeSurfaces.remove(cameraId)?.release()
                 return true
             }
 
@@ -296,14 +311,20 @@ class MultiCameraManager(private val context: Context) {
 
     fun unregisterTextureView(cameraId: String) {
         activeTextureViews.remove(cameraId)
+        activeSurfaces.remove(cameraId)?.release()
         closeCamera(cameraId)
     }
 
     fun getTextureView(cameraId: String): TextureView? = activeTextureViews[cameraId]
 
     private fun onTextureAvailable(cameraId: String, surfaceTexture: SurfaceTexture, viewWidth: Int, viewHeight: Int) {
-        if (selectedCameraIds.value.contains(cameraId)) {
-            openCamera(cameraId, surfaceTexture)
+        if (!selectedCameraIds.value.contains(cameraId)) return
+        val selected = selectedCameraIds.value
+        val allReady = selected.all { id -> activeTextureViews[id]?.isAvailable == true }
+        if (allReady) {
+            cameraHandler?.post {
+                openSelectedCamerasConcurrently()
+            }
         }
     }
 
@@ -325,8 +346,7 @@ class MultiCameraManager(private val context: Context) {
 
         val targetSize = chooseOptimalSize(cameraId, currentResolutionPreset.value)
         surfaceTexture.setDefaultBufferSize(targetSize.width, targetSize.height)
-        val surface = Surface(surfaceTexture)
-        activeSurfaces[cameraId] = surface
+        val surface = activeSurfaces.computeIfAbsent(cameraId) { Surface(surfaceTexture) }
 
         try {
             Log.d(TAG, "Requesting openCamera for ID: $cameraId with size ${targetSize.width}x${targetSize.height}")
@@ -391,11 +411,19 @@ class MultiCameraManager(private val context: Context) {
     ) {
         val handler = cameraHandler ?: return
         try {
+            val characteristics = cameraManager.getCameraCharacteristics(cameraId)
+            val afModes = characteristics.get(CameraCharacteristics.CONTROL_AF_AVAILABLE_MODES) ?: intArrayOf()
             val previewRequestBuilder = camera.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
                 addTarget(surface)
                 set(CaptureRequest.CONTROL_MODE, CameraMetadata.CONTROL_MODE_AUTO)
-                set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
-                applyHwAcceleration(this, isHwAccelerationEnabled.value)
+                if (afModes.contains(CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)) {
+                    set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
+                } else if (afModes.contains(CaptureRequest.CONTROL_AF_MODE_AUTO)) {
+                    set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_AUTO)
+                } else {
+                    set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_OFF)
+                }
+                applyHwAcceleration(cameraId, this, isHwAccelerationEnabled.value)
             }
 
             @Suppress("DEPRECATION")
@@ -406,7 +434,19 @@ class MultiCameraManager(private val context: Context) {
                         if (!activeDevices.containsKey(cameraId)) return
                         activeSessions[cameraId] = session
                         try {
-                            session.setRepeatingRequest(previewRequestBuilder.build(), null, handler)
+                            session.setRepeatingRequest(
+                                previewRequestBuilder.build(),
+                                object : CameraCaptureSession.CaptureCallback() {
+                                    override fun onCaptureFailed(
+                                        session: CameraCaptureSession,
+                                        request: CaptureRequest,
+                                        failure: CaptureFailure
+                                    ) {
+                                        Log.e(TAG, "Camera $cameraId repeating onCaptureFailed: reason=${failure.reason}")
+                                    }
+                                },
+                                handler
+                            )
                             streamStatuses[cameraId] = CameraStreamStatus(
                                 state = CameraStreamState.STREAMING,
                                 activeSize = size
@@ -440,30 +480,6 @@ class MultiCameraManager(private val context: Context) {
         }
     }
 
-    fun restartCameraStream(cameraId: String) {
-        val textureView = activeTextureViews[cameraId] ?: return
-        val surfaceTexture = textureView.surfaceTexture ?: return
-        if (cameraId == "1" && activeDevices.containsKey("0")) {
-            // MediaTek Dimensity HAL requires front camera to connect first to split ISP bandwidth
-            val backTv = activeTextureViews["0"]
-            val backSt = backTv?.surfaceTexture
-            closeCamera("0")
-            closeCamera("1")
-            cameraHandler?.postDelayed({
-                openCamera("1", surfaceTexture)
-                if (backSt != null) {
-                    cameraHandler?.postDelayed({
-                        openCamera("0", backSt)
-                    }, 400)
-                }
-            }, 350)
-        } else {
-            closeCamera(cameraId)
-            cameraHandler?.postDelayed({
-                openCamera(cameraId, surfaceTexture)
-            }, 350)
-        }
-    }
 
     fun closeCamera(cameraId: String) {
         try {
@@ -478,9 +494,7 @@ class MultiCameraManager(private val context: Context) {
             }
             activeDevices.remove(cameraId)
 
-            activeSurfaces[cameraId]?.apply {
-                try { release() } catch (ignored: Exception) {}
-            }
+            // Do NOT call release() on TextureView's Surface as it destroys the underlying SurfaceTexture
             activeSurfaces.remove(cameraId)
 
             streamStatuses[cameraId] = CameraStreamStatus(state = CameraStreamState.STOPPED)

@@ -101,6 +101,25 @@ fun MultiCamScreen(
         }
     }
 
+    // Preserve camera feed composables across layout changes so TextureViews are never destroyed
+    val cameraFeedContents = remember(activeCameras, focusedFullscreenCameraId) {
+        activeCameras.associate { cam ->
+            cam.cameraId to movableContentOf { modifier: Modifier, isFloating: Boolean ->
+                CameraFeedView(
+                    cameraInfo = cam,
+                    cameraManager = cameraManager,
+                    status = cameraManager.streamStatuses[cam.cameraId] ?: CameraStreamStatus(),
+                    isFullscreen = focusedFullscreenCameraId == cam.cameraId,
+                    onToggleFullscreen = {
+                        focusedFullscreenCameraId = if (focusedFullscreenCameraId == cam.cameraId) null else cam.cameraId
+                    },
+                    modifier = modifier,
+                    isFloating = isFloating
+                )
+            }
+        }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -109,17 +128,10 @@ fun MultiCamScreen(
         // 1. Camera Feeds Layout
         if (focusedFullscreenCameraId != null) {
             // Fullscreen focus mode
-            val focusedCam = discoveredCameras.firstOrNull { it.cameraId == focusedFullscreenCameraId }
-            if (focusedCam != null) {
-                CameraFeedView(
-                    cameraInfo = focusedCam,
-                    cameraManager = cameraManager,
-                    status = cameraManager.streamStatuses[focusedCam.cameraId] ?: CameraStreamStatus(),
-                    isFullscreen = true,
-                    onToggleFullscreen = { focusedFullscreenCameraId = null },
-                    modifier = Modifier.fillMaxSize()
-                )
-            }
+            cameraFeedContents[focusedFullscreenCameraId]?.invoke(
+                Modifier.fillMaxSize(),
+                false
+            )
         } else if (activeCameras.isEmpty()) {
             Box(
                 modifier = Modifier.fillMaxSize(),
@@ -139,19 +151,15 @@ fun MultiCamScreen(
                     Row(
                         modifier = Modifier
                             .fillMaxSize()
-                            .padding(top = 100.dp, bottom = 120.dp, start = 8.dp, end = 8.dp),
+                            .padding(top = 150.dp, bottom = 120.dp, start = 8.dp, end = 8.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         for (cam in activeCameras) {
-                            CameraFeedView(
-                                cameraInfo = cam,
-                                cameraManager = cameraManager,
-                                status = cameraManager.streamStatuses[cam.cameraId] ?: CameraStreamStatus(),
-                                isFullscreen = false,
-                                onToggleFullscreen = { focusedFullscreenCameraId = cam.cameraId },
-                                modifier = Modifier
+                            cameraFeedContents[cam.cameraId]?.invoke(
+                                Modifier
                                     .weight(1f)
-                                    .fillMaxHeight()
+                                    .fillMaxHeight(),
+                                false
                             )
                         }
                     }
@@ -162,19 +170,15 @@ fun MultiCamScreen(
                     Column(
                         modifier = Modifier
                             .fillMaxSize()
-                            .padding(top = 100.dp, bottom = 120.dp, start = 8.dp, end = 8.dp),
+                            .padding(top = 150.dp, bottom = 120.dp, start = 8.dp, end = 8.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         for (cam in activeCameras) {
-                            CameraFeedView(
-                                cameraInfo = cam,
-                                cameraManager = cameraManager,
-                                status = cameraManager.streamStatuses[cam.cameraId] ?: CameraStreamStatus(),
-                                isFullscreen = false,
-                                onToggleFullscreen = { focusedFullscreenCameraId = cam.cameraId },
-                                modifier = Modifier
+                            cameraFeedContents[cam.cameraId]?.invoke(
+                                Modifier
                                     .weight(1f)
-                                    .fillMaxWidth()
+                                    .fillMaxWidth(),
+                                false
                             )
                         }
                     }
@@ -185,15 +189,11 @@ fun MultiCamScreen(
                     val primaryCam = activeCameras.first()
                     val secondaryCams = activeCameras.drop(1)
 
-                    CameraFeedView(
-                        cameraInfo = primaryCam,
-                        cameraManager = cameraManager,
-                        status = cameraManager.streamStatuses[primaryCam.cameraId] ?: CameraStreamStatus(),
-                        isFullscreen = false,
-                        onToggleFullscreen = { focusedFullscreenCameraId = primaryCam.cameraId },
-                        modifier = Modifier
+                    cameraFeedContents[primaryCam.cameraId]?.invoke(
+                        Modifier
                             .fillMaxSize()
-                            .padding(top = 100.dp, bottom = 120.dp)
+                            .padding(top = 150.dp, bottom = 120.dp),
+                        false
                     )
 
                     // Floating cards for secondary/tertiary cameras
@@ -220,14 +220,9 @@ fun MultiCamScreen(
                                         .size(width = cardWidth, height = cardHeight)
                                         .shadow(8.dp, RoundedCornerShape(14.dp))
                                 ) {
-                                    CameraFeedView(
-                                        cameraInfo = secCam,
-                                        cameraManager = cameraManager,
-                                        status = cameraManager.streamStatuses[secCam.cameraId] ?: CameraStreamStatus(),
-                                        isFullscreen = false,
-                                        onToggleFullscreen = { focusedFullscreenCameraId = secCam.cameraId },
-                                        modifier = Modifier.fillMaxSize(),
-                                        isFloating = true
+                                    cameraFeedContents[secCam.cameraId]?.invoke(
+                                        Modifier.fillMaxSize(),
+                                        true
                                     )
                                 }
                             }
@@ -405,49 +400,69 @@ fun MultiCamScreen(
 
             Spacer(modifier = Modifier.height(4.dp))
 
-            // Row 3: Layout switcher & Resolution Selector
+            // Row 3: Layout switcher
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Layout Switcher
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    ViewLayoutMode.values().forEach { mode ->
-                        val active = layoutMode == mode
-                        Surface(
-                            shape = RoundedCornerShape(12.dp),
-                            color = if (active) Color(0xFF1565C0) else Color(0xFF242424),
-                            modifier = Modifier.clickable { layoutMode = mode }
-                        ) {
-                            Text(
-                                text = mode.displayName,
-                                fontSize = 9.5.sp,
-                                color = if (active) Color.White else Color.Gray,
-                                fontFamily = FontFamily.Monospace,
-                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp)
-                            )
-                        }
+                Text(
+                    text = "VIEW:",
+                    fontSize = 10.sp,
+                    color = Color.LightGray,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold
+                )
+                ViewLayoutMode.values().forEach { mode ->
+                    val active = layoutMode == mode
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = if (active) Color(0xFF1565C0) else Color(0xFF242424),
+                        border = if (active) androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF64B5F6)) else null,
+                        modifier = Modifier.clickable { layoutMode = mode }
+                    ) {
+                        Text(
+                            text = mode.displayName,
+                            fontSize = 9.5.sp,
+                            color = if (active) Color.White else Color.LightGray,
+                            fontFamily = FontFamily.Monospace,
+                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp)
+                        )
                     }
                 }
+            }
 
-                // Resolution presets
-                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                    ResolutionPreset.values().forEach { preset ->
-                        val active = currentPreset == preset
-                        Surface(
-                            shape = RoundedCornerShape(12.dp),
-                            color = if (active) Color(0xFFE65100) else Color(0xFF242424),
-                            modifier = Modifier.clickable { cameraManager.setResolutionPreset(preset) }
-                        ) {
-                            Text(
-                                text = preset.displayName.substringBefore(" "),
-                                fontSize = 9.5.sp,
-                                color = if (active) Color.White else Color.Gray,
-                                fontFamily = FontFamily.Monospace,
-                                modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp)
-                            )
-                        }
+            Spacer(modifier = Modifier.height(4.dp))
+
+            // Row 4: Resolution Presets (480p, 720p, 1080p)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "RES: ",
+                    fontSize = 10.sp,
+                    color = Color.LightGray,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold
+                )
+                ResolutionPreset.values().forEach { preset ->
+                    val active = currentPreset == preset
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = if (active) Color(0xFFE65100) else Color(0xFF242424),
+                        border = if (active) androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFFB74D)) else null,
+                        modifier = Modifier.clickable { cameraManager.setResolutionPreset(preset) }
+                    ) {
+                        Text(
+                            text = preset.displayName,
+                            fontSize = 10.sp,
+                            fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
+                            color = if (active) Color.White else Color.LightGray,
+                            fontFamily = FontFamily.Monospace,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                        )
                     }
                 }
             }
