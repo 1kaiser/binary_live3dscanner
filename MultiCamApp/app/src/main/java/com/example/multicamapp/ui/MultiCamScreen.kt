@@ -113,7 +113,10 @@ fun MultiCamScreen(
     // Helper to grab FULL uncropped bitmaps from active TextureViews
     val getBitmapFrames = remember(cameraManager, activeCameras, isLandscape) {
         {
-            activeCameras.mapNotNull { cam ->
+            activeCameras.filter { cam ->
+                val status = cameraManager.streamStatuses[cam.cameraId]
+                status != null && status.state != com.example.multicamapp.camera.CameraStreamState.ERROR
+            }.mapNotNull { cam ->
                 val tv = cameraManager.getTextureView(cam.cameraId)
                 val streamSize = cameraManager.streamStatuses[cam.cameraId]?.activeSize
                     ?: android.util.Size(1280, 720)
@@ -176,8 +179,8 @@ fun MultiCamScreen(
     }
 
     // Preserve camera feed composables across layout changes so TextureViews are never destroyed
-    val cameraFeedContents = remember(activeCameras, focusedFullscreenCameraId) {
-        activeCameras.associate { cam ->
+    val cameraFeedContents = remember(discoveredCameras, focusedFullscreenCameraId) {
+        discoveredCameras.associate { cam ->
             cam.cameraId to movableContentOf { modifier: Modifier, isFloating: Boolean ->
                 CameraFeedView(
                     cameraInfo = cam,

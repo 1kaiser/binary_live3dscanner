@@ -173,22 +173,30 @@ class MultiCameraManager(private val context: Context) {
                 }
             }
 
-            // Default selection: Primary back + Front (or first 2 cameras)
+            // Default selection: If device supports concurrent cameras, select Back + Front.
+            // If device DOES NOT support concurrent cameras (like Pixel 3a), default to 1 camera (Back Main)
             val defaultSelection = mutableSetOf<String>()
             val mainBack = list.firstOrNull { it.lensType == LensType.BACK_MAIN }
             val front = list.firstOrNull { it.lensType == LensType.FRONT }
 
-            if (mainBack != null) defaultSelection.add(mainBack.cameraId)
-            if (front != null) defaultSelection.add(front.cameraId)
+            val canRunConcurrent = concurrentCameraSets.value.any { set ->
+                mainBack != null && front != null && set.contains(mainBack.cameraId) && set.contains(front.cameraId)
+            }
 
-            if (defaultSelection.size < 2 && list.size >= 2) {
-                defaultSelection.addAll(list.take(2).map { it.cameraId })
-            } else if (defaultSelection.isEmpty() && list.isNotEmpty()) {
-                defaultSelection.add(list.first().cameraId)
+            if (canRunConcurrent) {
+                if (mainBack != null) defaultSelection.add(mainBack.cameraId)
+                if (front != null) defaultSelection.add(front.cameraId)
+            } else {
+                // Device does not support concurrent cameras (e.g. Pixel 3a): default to Main Back
+                if (mainBack != null) {
+                    defaultSelection.add(mainBack.cameraId)
+                } else if (list.isNotEmpty()) {
+                    defaultSelection.add(list.first().cameraId)
+                }
             }
 
             selectedCameraIds.value = defaultSelection
-            Log.d(TAG, "Default camera selection: $defaultSelection")
+            Log.d(TAG, "Default camera selection: $defaultSelection (supportsConcurrent=$canRunConcurrent)")
 
         } catch (e: Exception) {
             Log.e(TAG, "Error discovering cameras", e)
@@ -198,14 +206,29 @@ class MultiCameraManager(private val context: Context) {
     fun toggleCameraSelection(cameraId: String) {
         val current = selectedCameraIds.value.toMutableSet()
         if (current.contains(cameraId)) {
-            current.remove(cameraId)
-            selectedCameraIds.value = current
-            closeCamera(cameraId)
+            if (current.size > 1) {
+                current.remove(cameraId)
+                selectedCameraIds.value = current
+                reopenActiveStreams()
+            }
         } else {
-            current.add(cameraId)
-            selectedCameraIds.value = current
-            reopenActiveStreams()
+            val hasConcurrentCapability = concurrentCameraSets.value.isNotEmpty()
+            val isComboSupported = hasConcurrentCapability && concurrentCameraSets.value.any { it.containsAll(current + cameraId) }
+            if (!isComboSupported) {
+                // Device does not support concurrent cameras (like Pixel 3a) or combo unsupported:
+                // seamlessly switch to this camera
+                switchToSingleCamera(cameraId)
+            } else {
+                current.add(cameraId)
+                selectedCameraIds.value = current
+                reopenActiveStreams()
+            }
         }
+    }
+
+    fun switchToSingleCamera(cameraId: String) {
+        selectedCameraIds.value = setOf(cameraId)
+        reopenActiveStreams()
     }
 
     fun setResolutionPreset(preset: ResolutionPreset) {
@@ -229,13 +252,16 @@ class MultiCameraManager(private val context: Context) {
         }
     }
 
-    private fun reopenActiveStreams() {
-        for (id in activeDevices.keys().toList()) {
-            closeCamera(id)
+    fun reopenActiveStreams() {
+        cameraHandler?.removeCallbacksAndMessages(null)
+        cameraHandler?.post {
+            for (id in activeDevices.keys().toList()) {
+                closeCamera(id)
+            }
+            cameraHandler?.postDelayed({
+                openSelectedCamerasConcurrently()
+            }, 300)
         }
-        cameraHandler?.postDelayed({
-            openSelectedCamerasConcurrently()
-        }, 400)
     }
 
     fun toggleHwAcceleration(enabled: Boolean) {
@@ -280,31 +306,39 @@ class MultiCameraManager(private val context: Context) {
 
     fun registerTextureView(cameraId: String, textureView: TextureView) {
         activeTextureViews[cameraId] = textureView
-        if (textureView.isAvailable && textureView.surfaceTexture != null) {
-            val st = textureView.surfaceTexture!!
-            activeSurfaces[cameraId]?.release()
-            activeSurfaces[cameraId] = Surface(st)
-            onTextureAvailable(cameraId, st, textureView.width, textureView.height)
-        }
         textureView.surfaceTextureListener = object : TextureView.SurfaceTextureListener {
             override fun onSurfaceTextureAvailable(surface: SurfaceTexture, width: Int, height: Int) {
-                activeSurfaces[cameraId]?.release()
-                activeSurfaces[cameraId] = Surface(surface)
-                onTextureAvailable(cameraId, surface, width, height)
+                Log.d(TAG, "onSurfaceTextureAvailable for camera $cameraId (${width}x${height})")
+                if (selectedCameraIds.value.contains(cameraId)) {
+                    cameraHandler?.post {
+                        if (!activeDevices.containsKey(cameraId)) {
+                            openCamera(cameraId, surface)
+                        }
+                    }
+                }
             }
 
-            override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) {
-                // Surface resized
-            }
+            override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture, width: Int, height: Int) {}
 
             override fun onSurfaceTextureDestroyed(surface: SurfaceTexture): Boolean {
+                Log.d(TAG, "onSurfaceTextureDestroyed for camera $cameraId")
                 closeCamera(cameraId)
-                activeSurfaces.remove(cameraId)?.release()
                 return true
             }
 
             override fun onSurfaceTextureUpdated(surface: SurfaceTexture) {
                 updateFps(cameraId)
+            }
+        }
+
+        if (textureView.isAvailable && textureView.surfaceTexture != null) {
+            val st = textureView.surfaceTexture!!
+            if (selectedCameraIds.value.contains(cameraId)) {
+                cameraHandler?.post {
+                    if (!activeDevices.containsKey(cameraId)) {
+                        openCamera(cameraId, st)
+                    }
+                }
             }
         }
     }
@@ -413,10 +447,33 @@ class MultiCameraManager(private val context: Context) {
     ) {
         val handler = cameraHandler ?: return
         try {
+            val tv = activeTextureViews[cameraId]
+            val effectiveSurface = if (surface.isValid) {
+                surface
+            } else {
+                val st = tv?.surfaceTexture
+                if (st != null) {
+                    st.setDefaultBufferSize(size.width, size.height)
+                    val fresh = Surface(st)
+                    activeSurfaces[cameraId] = fresh
+                    fresh
+                } else null
+            }
+
+            if (effectiveSurface == null || !effectiveSurface.isValid) {
+                Log.w(TAG, "Cannot create capture session for camera $cameraId: surface is invalid or abandoned")
+                closeCamera(cameraId)
+                streamStatuses[cameraId] = CameraStreamStatus(
+                    state = CameraStreamState.ERROR,
+                    errorMessage = "Preview surface unavailable"
+                )
+                return
+            }
+
             val characteristics = cameraManager.getCameraCharacteristics(cameraId)
             val afModes = characteristics.get(CameraCharacteristics.CONTROL_AF_AVAILABLE_MODES) ?: intArrayOf()
             val previewRequestBuilder = camera.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW).apply {
-                addTarget(surface)
+                addTarget(effectiveSurface)
                 set(CaptureRequest.CONTROL_MODE, CameraMetadata.CONTROL_MODE_AUTO)
                 if (afModes.contains(CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)) {
                     set(CaptureRequest.CONTROL_AF_MODE, CaptureRequest.CONTROL_AF_MODE_CONTINUOUS_PICTURE)
@@ -430,7 +487,7 @@ class MultiCameraManager(private val context: Context) {
 
             @Suppress("DEPRECATION")
             camera.createCaptureSession(
-                listOf(surface),
+                listOf(effectiveSurface),
                 object : CameraCaptureSession.StateCallback() {
                     override fun onConfigured(session: CameraCaptureSession) {
                         if (!activeDevices.containsKey(cameraId)) return

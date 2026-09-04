@@ -160,13 +160,23 @@ fun CameraFeedView(
                             fontFamily = FontFamily.Monospace
                         )
                         Spacer(modifier = Modifier.height(8.dp))
-                        Button(
-                            onClick = { cameraManager.restartCameraStream(cameraInfo.cameraId) },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC62828)),
-                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                            shape = RoundedCornerShape(6.dp)
-                        ) {
-                            Text("Retry Stream", fontSize = 9.sp, color = Color.White, fontFamily = FontFamily.Monospace)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(
+                                onClick = { cameraManager.restartCameraStream(cameraInfo.cameraId) },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC62828)),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                shape = RoundedCornerShape(6.dp)
+                            ) {
+                                Text("Retry", fontSize = 9.sp, color = Color.White, fontFamily = FontFamily.Monospace)
+                            }
+                            Button(
+                                onClick = { cameraManager.switchToSingleCamera(cameraInfo.cameraId) },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00897B)),
+                                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                                shape = RoundedCornerShape(6.dp)
+                            ) {
+                                Text("Switch to this Cam", fontSize = 9.sp, color = Color.White, fontFamily = FontFamily.Monospace)
+                            }
                         }
                     }
                 }
