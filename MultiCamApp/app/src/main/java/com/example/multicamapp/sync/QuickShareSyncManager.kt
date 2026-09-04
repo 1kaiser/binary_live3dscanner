@@ -1,18 +1,22 @@
 package com.example.multicamapp.sync
 
 import android.content.Context
+import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import com.google.android.gms.nearby.Nearby
 import com.google.android.gms.nearby.connection.*
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import org.json.JSONObject
+import java.io.BufferedReader
+import java.io.InputStreamReader
+import java.io.PrintWriter
+import java.net.*
 import java.nio.charset.StandardCharsets
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -37,6 +41,7 @@ class QuickShareSyncManager(private val context: Context) {
 
     private val connectionsClient: ConnectionsClient = Nearby.getConnectionsClient(context)
     private val mainHandler = Handler(Looper.getMainLooper())
+    private val syncScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     private val _role = MutableStateFlow(SyncRole.STANDALONE)
     val role: StateFlow<SyncRole> = _role.asStateFlow()
@@ -50,16 +55,21 @@ class QuickShareSyncManager(private val context: Context) {
     private val _statusText = MutableStateFlow("Quick Share: Standalone")
     val statusText: StateFlow<String> = _statusText.asStateFlow()
 
+    val localIpAddress: String? get() = findLocalIpAddress()
+
     private val activeNodesMap = ConcurrentHashMap<String, SyncNode>()
+    private val activeTcpClients = ConcurrentHashMap<String, Socket>()
     private var hostEndpointId: String? = null
-    private var estimatedClockOffsetMs = 0L // Worker clock offset relative to Host
+    private var workerTcpSocket: Socket? = null
+    private var serverSocket: ServerSocket? = null
+    private var estimatedClockOffsetMs = 0L
 
     // Callbacks for local hardware execution
     var onSyncPhotoTrigger: ((sessionId: String) -> Unit)? = null
     var onSyncRecordStartTrigger: ((sessionId: String) -> Unit)? = null
     var onSyncRecordStopTrigger: (() -> Unit)? = null
 
-    private val localDeviceName: String = run {
+    val localDeviceName: String = run {
         val manufacturer = Build.MANUFACTURER.replaceFirstChar { it.uppercase() }
         val model = Build.MODEL
         "$manufacturer $model"
@@ -81,8 +91,7 @@ class QuickShareSyncManager(private val context: Context) {
 
     private val connectionLifecycleCallback = object : ConnectionLifecycleCallback() {
         override fun onConnectionInitiated(endpointId: String, info: ConnectionInfo) {
-            Log.d(TAG, "Connection initiated from: ${info.endpointName} ($endpointId)")
-            // Auto-accept pairing (Quick Share automatic pairing)
+            Log.d(TAG, "Nearby Connection initiated from: ${info.endpointName} ($endpointId)")
             connectionsClient.acceptConnection(endpointId, payloadCallback)
                 .addOnSuccessListener {
                     val node = SyncNode(endpointId, info.endpointName)
@@ -99,9 +108,8 @@ class QuickShareSyncManager(private val context: Context) {
                 Log.d(TAG, "Connection confirmed with $endpointId")
                 if (_role.value == SyncRole.WORKER) {
                     hostEndpointId = endpointId
-                    _statusText.value = "Quick Share: Connected to Host"
+                    _statusText.value = "Connected to Host via Quick Share"
                     _isSearching.value = false
-                    // Start clock synchronization
                     sendPing(endpointId)
                 } else if (_role.value == SyncRole.HOST) {
                     _statusText.value = "Host: ${activeNodesMap.size} node(s) connected"
@@ -119,7 +127,7 @@ class QuickShareSyncManager(private val context: Context) {
             activeNodesMap.remove(endpointId)
             if (endpointId == hostEndpointId) {
                 hostEndpointId = null
-                _statusText.value = "Quick Share: Host disconnected"
+                _statusText.value = "Host disconnected"
             } else if (_role.value == SyncRole.HOST) {
                 _statusText.value = "Host: ${activeNodesMap.size} node(s) connected"
             }
@@ -129,7 +137,7 @@ class QuickShareSyncManager(private val context: Context) {
 
     private val endpointDiscoveryCallback = object : EndpointDiscoveryCallback() {
         override fun onEndpointFound(endpointId: String, info: DiscoveredEndpointInfo) {
-            Log.d(TAG, "Discovered endpoint: ${info.endpointName} ($endpointId)")
+            Log.d(TAG, "Nearby discovered: ${info.endpointName} ($endpointId)")
             _statusText.value = "Pairing with ${info.endpointName}..."
             connectionsClient.requestConnection(localDeviceName, endpointId, connectionLifecycleCallback)
                 .addOnFailureListener { e ->
@@ -147,9 +155,11 @@ class QuickShareSyncManager(private val context: Context) {
     fun startHost() {
         stopSync()
         _role.value = SyncRole.HOST
-        _statusText.value = "Quick Share: Broadcasting as Host..."
+        val ip = localIpAddress ?: "Wi-Fi"
+        _statusText.value = "Host: $ip (Waiting for nodes...)"
         _isSearching.value = true
 
+        // 1. Google Nearby Connections Advertising
         val advertisingOptions = AdvertisingOptions.Builder()
             .setStrategy(Strategy.P2P_STAR)
             .build()
@@ -160,21 +170,25 @@ class QuickShareSyncManager(private val context: Context) {
             connectionLifecycleCallback,
             advertisingOptions
         ).addOnSuccessListener {
-            Log.d(TAG, "Host advertising started successfully")
-            _statusText.value = "Host: Waiting for worker devices..."
+            Log.d(TAG, "Host Quick Share advertising started")
         }.addOnFailureListener { e ->
-            Log.e(TAG, "Host advertising failed", e)
-            _statusText.value = "Host error: ${e.message}"
-            _isSearching.value = false
+            Log.w(TAG, "Quick Share advertising warning: ${e.message}")
         }
+
+        // 2. High-speed Direct TCP ServerSocket
+        startTcpServer()
+
+        // 3. UDP Discovery Broadcast on LAN
+        startUdpBeaconSender()
     }
 
-    fun startWorker() {
+    fun startWorker(targetHostIp: String? = null) {
         stopSync()
         _role.value = SyncRole.WORKER
-        _statusText.value = "Quick Share: Scanning for Host..."
+        _statusText.value = "Scanning for Host..."
         _isSearching.value = true
 
+        // 1. Google Nearby Discovery
         val discoveryOptions = DiscoveryOptions.Builder()
             .setStrategy(Strategy.P2P_STAR)
             .build()
@@ -184,19 +198,68 @@ class QuickShareSyncManager(private val context: Context) {
             endpointDiscoveryCallback,
             discoveryOptions
         ).addOnSuccessListener {
-            Log.d(TAG, "Worker discovery started successfully")
+            Log.d(TAG, "Worker Quick Share discovery started")
         }.addOnFailureListener { e ->
-            Log.e(TAG, "Worker discovery failed", e)
-            _statusText.value = "Discovery error: ${e.message}"
-            _isSearching.value = false
+            Log.w(TAG, "Quick Share discovery warning: ${e.message}")
+        }
+
+        // 2. UDP Beacon Receiver
+        startUdpBeaconReceiver()
+
+        // 3. Direct IP connection if provided
+        if (!targetHostIp.isNullOrBlank()) {
+            connectToHostIp(targetHostIp.trim())
+        }
+    }
+
+    fun connectToHostIp(ip: String) {
+        syncScope.launch {
+            try {
+                _statusText.value = "Connecting to $ip:$TCP_PORT..."
+                val socket = Socket()
+                socket.connect(InetSocketAddress(ip, TCP_PORT), 4000)
+                workerTcpSocket = socket
+                val endpointId = "tcp_$ip"
+                hostEndpointId = endpointId
+                val node = SyncNode(endpointId, "Host ($ip)")
+                activeNodesMap[endpointId] = node
+                _isSearching.value = false
+                _statusText.value = "Connected to Host ($ip)"
+                updateNodesList()
+
+                // Start reader & initial ping
+                startSocketReader(socket, endpointId)
+                sendPing(endpointId)
+            } catch (e: Exception) {
+                Log.e(TAG, "Direct TCP connection to $ip failed", e)
+                _statusText.value = "Connection to $ip failed: ${e.message}"
+            }
         }
     }
 
     fun stopSync() {
-        connectionsClient.stopAdvertising()
-        connectionsClient.stopDiscovery()
-        connectionsClient.stopAllEndpoints()
+        try {
+            connectionsClient.stopAdvertising()
+            connectionsClient.stopDiscovery()
+            connectionsClient.stopAllEndpoints()
+        } catch (ignored: Exception) {}
+
+        try {
+            serverSocket?.close()
+            serverSocket = null
+        } catch (ignored: Exception) {}
+
+        try {
+            workerTcpSocket?.close()
+            workerTcpSocket = null
+        } catch (ignored: Exception) {}
+
+        activeTcpClients.values.forEach {
+            try { it.close() } catch (ignored: Exception) {}
+        }
+        activeTcpClients.clear()
         activeNodesMap.clear()
+
         hostEndpointId = null
         estimatedClockOffsetMs = 0L
         _role.value = SyncRole.STANDALONE
@@ -206,7 +269,110 @@ class QuickShareSyncManager(private val context: Context) {
     }
 
     private fun updateNodesList() {
-        _connectedNodes.value = activeNodesMap.values.toList()
+        mainHandler.post {
+            _connectedNodes.value = activeNodesMap.values.toList()
+        }
+    }
+
+    // --- Direct TCP / UDP Networking Engine ---
+
+    private fun startTcpServer() {
+        syncScope.launch {
+            try {
+                val server = ServerSocket()
+                server.reuseAddress = true
+                server.bind(InetSocketAddress(TCP_PORT))
+                serverSocket = server
+                while (_role.value == SyncRole.HOST && !server.isClosed) {
+                    val client = server.accept()
+                    val clientIp = client.inetAddress.hostAddress ?: "client"
+                    val endpointId = "tcp_$clientIp"
+                    activeTcpClients[endpointId] = client
+                    val node = SyncNode(endpointId, "Worker ($clientIp)")
+                    activeNodesMap[endpointId] = node
+                    _statusText.value = "Host: ${activeNodesMap.size} node(s) connected"
+                    updateNodesList()
+                    startSocketReader(client, endpointId)
+                }
+            } catch (e: Exception) {
+                if (_role.value == SyncRole.HOST) {
+                    Log.e(TAG, "TCP Server exception", e)
+                }
+            }
+        }
+    }
+
+    private fun startSocketReader(socket: Socket, endpointId: String) {
+        syncScope.launch {
+            try {
+                val reader = BufferedReader(InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8))
+                while (!socket.isClosed) {
+                    val line = reader.readLine() ?: break
+                    handleIncomingMessage(endpointId, line)
+                }
+            } catch (ignored: Exception) {
+            } finally {
+                activeTcpClients.remove(endpointId)
+                activeNodesMap.remove(endpointId)
+                updateNodesList()
+            }
+        }
+    }
+
+    private fun startUdpBeaconSender() {
+        syncScope.launch {
+            val ip = localIpAddress ?: return@launch
+            val beaconMsg = JSONObject().apply {
+                put("type", "MULTICAM_BEACON")
+                put("host", localDeviceName)
+                put("ip", ip)
+                put("port", TCP_PORT)
+            }.toString().toByteArray(StandardCharsets.UTF_8)
+
+            try {
+                val socket = DatagramSocket()
+                socket.broadcast = true
+                val broadcastAddr = InetAddress.getByName("255.255.255.255")
+                val packet = DatagramPacket(beaconMsg, beaconMsg.size, broadcastAddr, UDP_PORT)
+
+                while (_role.value == SyncRole.HOST) {
+                    socket.send(packet)
+                    delay(1500)
+                }
+                socket.close()
+            } catch (e: Exception) {
+                Log.w(TAG, "UDP Beacon sender error", e)
+            }
+        }
+    }
+
+    private fun startUdpBeaconReceiver() {
+        syncScope.launch {
+            try {
+                val socket = DatagramSocket(UDP_PORT)
+                socket.soTimeout = 2000
+                val buffer = ByteArray(1024)
+                val packet = DatagramPacket(buffer, buffer.size)
+
+                while (_role.value == SyncRole.WORKER && workerTcpSocket == null) {
+                    try {
+                        socket.receive(packet)
+                        val msg = String(packet.data, 0, packet.length, StandardCharsets.UTF_8)
+                        val json = JSONObject(msg)
+                        if (json.optString("type") == "MULTICAM_BEACON") {
+                            val hostIp = json.getString("ip")
+                            Log.d(TAG, "Discovered Host via UDP beacon: $hostIp")
+                            connectToHostIp(hostIp)
+                            break
+                        }
+                    } catch (ignored: SocketTimeoutException) {
+                    }
+                }
+                socket.close()
+            } catch (e: Exception) {
+                Log.w(TAG, "UDP Beacon receiver error", e)
+            }
+        }
     }
 
     // --- Message Handling & Time Synchronization ---
@@ -216,7 +382,6 @@ class QuickShareSyncManager(private val context: Context) {
             val json = JSONObject(jsonStr)
             when (json.optString("action")) {
                 "PING" -> {
-                    // Host replies to worker with timestamp
                     val t0 = json.getLong("t0")
                     val reply = JSONObject().apply {
                         put("action", "PONG")
@@ -226,12 +391,10 @@ class QuickShareSyncManager(private val context: Context) {
                     sendPayload(endpointId, reply.toString())
                 }
                 "PONG" -> {
-                    // Worker calculates clock offset
                     val t0 = json.getLong("t0")
                     val tServer = json.getLong("tServer")
                     val t1 = System.currentTimeMillis()
                     val rtt = t1 - t0
-                    // Clock offset = tServer - (t0 + rtt / 2)
                     estimatedClockOffsetMs = tServer - (t0 + rtt / 2)
                     Log.d(TAG, "Synced clock with host. Offset: ${estimatedClockOffsetMs}ms, RTT: ${rtt}ms")
                     val node = activeNodesMap[endpointId]?.copy(clockOffsetMs = estimatedClockOffsetMs)
@@ -277,7 +440,6 @@ class QuickShareSyncManager(private val context: Context) {
     }
 
     private fun scheduleExecution(targetHostTimeMs: Long, action: () -> Unit) {
-        // Convert host target timestamp to local device time using offset
         val localTargetTime = targetHostTimeMs - estimatedClockOffsetMs
         val now = System.currentTimeMillis()
         val delayMs = (localTargetTime - now).coerceAtLeast(0)
@@ -288,20 +450,46 @@ class QuickShareSyncManager(private val context: Context) {
     }
 
     private fun sendPayload(endpointId: String, message: String) {
-        val bytes = message.toByteArray(StandardCharsets.UTF_8)
-        val payload = Payload.fromBytes(bytes)
-        connectionsClient.sendPayload(endpointId, payload)
+        syncScope.launch {
+            if (endpointId.startsWith("tcp_")) {
+                val socket = if (_role.value == SyncRole.HOST) activeTcpClients[endpointId] else workerTcpSocket
+                try {
+                    socket?.let {
+                        val writer = PrintWriter(it.getOutputStream(), true)
+                        writer.println(message)
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "TCP send error to $endpointId", e)
+                }
+            } else {
+                val bytes = message.toByteArray(StandardCharsets.UTF_8)
+                val payload = Payload.fromBytes(bytes)
+                connectionsClient.sendPayload(endpointId, payload)
+            }
+        }
     }
 
     private fun broadcastToAllNodes(message: String) {
-        val endpoints = activeNodesMap.keys.toList()
-        if (endpoints.isEmpty()) return
-        val bytes = message.toByteArray(StandardCharsets.UTF_8)
-        val payload = Payload.fromBytes(bytes)
-        connectionsClient.sendPayload(endpoints, payload)
+        syncScope.launch {
+            // 1. Send to all TCP clients
+            activeTcpClients.values.forEach { socket ->
+                try {
+                    val writer = PrintWriter(socket.getOutputStream(), true)
+                    writer.println(message)
+                } catch (ignored: Exception) {}
+            }
+
+            // 2. Send to all Nearby endpoints
+            val nearbyEndpoints = activeNodesMap.keys.filterNot { it.startsWith("tcp_") }
+            if (nearbyEndpoints.isNotEmpty()) {
+                val bytes = message.toByteArray(StandardCharsets.UTF_8)
+                val payload = Payload.fromBytes(bytes)
+                connectionsClient.sendPayload(nearbyEndpoints, payload)
+            }
+        }
     }
 
-    // --- Public Synchronized Triggers (Called by Host UI) ---
+    // --- Public Synchronized Triggers ---
 
     fun triggerSynchronousPhoto(onLocalTrigger: (sessionId: String) -> Unit) {
         val sessionId = "SESSION_" + SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US).format(Date())
@@ -317,7 +505,6 @@ class QuickShareSyncManager(private val context: Context) {
                 onLocalTrigger(sessionId)
             }
         } else {
-            // Standalone or no workers connected: fire immediately
             onLocalTrigger(sessionId)
         }
     }
@@ -350,14 +537,35 @@ class QuickShareSyncManager(private val context: Context) {
         onLocalTrigger()
     }
 
+    private fun findLocalIpAddress(): String? {
+        try {
+            val interfaces = NetworkInterface.getNetworkInterfaces()
+            while (interfaces.hasMoreElements()) {
+                val iface = interfaces.nextElement()
+                if (iface.isLoopback || !iface.isUp) continue
+                val addrs = iface.inetAddresses
+                while (addrs.hasMoreElements()) {
+                    val addr = addrs.nextElement()
+                    if (!addr.isLoopbackAddress && addr is Inet4Address) {
+                        return addr.hostAddress
+                    }
+                }
+            }
+        } catch (ignored: Exception) {}
+        return null
+    }
+
     fun onDestroy() {
         stopSync()
+        syncScope.cancel()
     }
 
     companion object {
         private const val TAG = "QuickShareSync"
         private const val SERVICE_ID = "com.example.multicamapp.quickshare"
-        private const val SYNC_PHOTO_LEAD_TIME_MS = 250L  // 250ms lead time allows network packet arrival
-        private const val SYNC_RECORD_LEAD_TIME_MS = 300L // 300ms lead time for video start
+        private const val TCP_PORT = 8988
+        private const val UDP_PORT = 8989
+        private const val SYNC_PHOTO_LEAD_TIME_MS = 250L
+        private const val SYNC_RECORD_LEAD_TIME_MS = 300L
     }
 }

@@ -10,8 +10,10 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -832,6 +834,7 @@ fun QuickShareDialog(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
                     .padding(vertical = 4.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
@@ -948,6 +951,35 @@ fun QuickShareDialog(
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold
                         )
+                    }
+                }
+
+                var customIpInput by remember { mutableStateOf("") }
+                if (role == SyncRole.WORKER && connectedNodes.isEmpty()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = customIpInput,
+                            onValueChange = { customIpInput = it },
+                            placeholder = { Text("Host IP (e.g. 172.31.10.35)", fontSize = 11.sp, color = Color.Gray) },
+                            singleLine = true,
+                            modifier = Modifier.weight(1f),
+                            textStyle = androidx.compose.ui.text.TextStyle(fontSize = 12.sp, color = Color.White, fontFamily = FontFamily.Monospace),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = Color(0xFF448AFF),
+                                unfocusedBorderColor = Color.DarkGray
+                            )
+                        )
+                        Button(
+                            onClick = { if (customIpInput.isNotBlank()) syncManager.connectToHostIp(customIpInput.trim()) },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF448AFF)),
+                            modifier = Modifier.height(50.dp)
+                        ) {
+                            Text("Connect", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
                     }
                 }
 
