@@ -32,9 +32,12 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.ui.zIndex
+import com.example.multicamapp.camera.CameraAvailabilityState
 import com.example.multicamapp.camera.CameraDeviceInfo
 import com.example.multicamapp.camera.CameraStreamStatus
+import com.example.multicamapp.camera.DeviceHardwareConcurrencyMode
 import com.example.multicamapp.camera.MultiCameraManager
 import com.example.multicamapp.camera.ResolutionPreset
 import com.example.multicamapp.capture.MultiCamPhotoCapture
@@ -171,10 +174,15 @@ fun MultiCamScreen(
                 }
             }
         }
+        cameraManager.onCameraStateChanged = { mode, activeCams, availCams ->
+            syncManager.broadcastDeviceStatus(mode, activeCams, availCams)
+        }
+        cameraManager.recomputeAvailabilityStates()
         onDispose {
             syncManager.onSyncPhotoTrigger = null
             syncManager.onSyncRecordStartTrigger = null
             syncManager.onSyncRecordStopTrigger = null
+            cameraManager.onCameraStateChanged = null
         }
     }
 
@@ -496,7 +504,7 @@ fun MultiCamScreen(
 
             Spacer(modifier = Modifier.height(6.dp))
 
-            // Row 2: Camera Selection Chips (Any combination!)
+            // Row 2: Camera Selection Chips & Hardware Concurrency Detector
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -510,26 +518,107 @@ fun MultiCamScreen(
                     fontWeight = FontWeight.Bold
                 )
 
+                // Hardware ISP Concurrency Mode Badge
+                val concurrencyMode by cameraManager.hardwareConcurrencyMode
+                val isConcurrent = concurrencyMode == DeviceHardwareConcurrencyMode.CONCURRENT_MULTI_CAM
+                Surface(
+                    shape = RoundedCornerShape(4.dp),
+                    color = if (isConcurrent) Color(0xFF004D40) else Color(0xFFE65100).copy(alpha = 0.25f),
+                    border = BorderStroke(1.dp, if (isConcurrent) Color(0xFF00E676) else Color(0xFFFF9800))
+                ) {
+                    Text(
+                        text = if (isConcurrent) "⚡ DUAL-ISP" else "📷 SINGLE-ISP",
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isConcurrent) Color(0xFF69F0AE) else Color(0xFFFFB74D),
+                        fontFamily = FontFamily.Monospace,
+                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                    )
+                }
+
                 discoveredCameras.forEach { cam ->
                     val isSel = selectedCameraIds.contains(cam.cameraId)
-                    FilterChip(
-                        selected = isSel,
-                        onClick = { cameraManager.toggleCameraSelection(cam.cameraId) },
-                        label = {
+                    val availState = cameraManager.cameraAvailabilityStates[cam.cameraId]
+                        ?: (if (isSel) CameraAvailabilityState.STREAMING else CameraAvailabilityState.AVAILABLE)
+
+                    val chipLabel: String
+                    val chipIcon: String
+                    val chipBorderColor: Color
+                    val chipContainerColor: Color
+                    val chipLabelColor: Color
+
+                    when (availState) {
+                        CameraAvailabilityState.STREAMING -> {
+                            chipLabel = "Cam ${cam.cameraId} (${cam.displayName.take(7)})"
+                            chipIcon = "●"
+                            chipBorderColor = Color(0xFF00E676)
+                            chipContainerColor = Color(0xFF00695C)
+                            chipLabelColor = Color.White
+                        }
+                        CameraAvailabilityState.AVAILABLE -> {
+                            chipLabel = "Cam ${cam.cameraId} (+ADD)"
+                            chipIcon = "+"
+                            chipBorderColor = Color(0xFF00897B)
+                            chipContainerColor = Color(0xFF212121)
+                            chipLabelColor = Color(0xFF80CBC4)
+                        }
+                        CameraAvailabilityState.ISP_SWITCHABLE -> {
+                            chipLabel = "Cam ${cam.cameraId} (SWITCH)"
+                            chipIcon = "⇄"
+                            chipBorderColor = Color(0xFFFF9800)
+                            chipContainerColor = Color(0xFF262626)
+                            chipLabelColor = Color(0xFFFFCC80)
+                        }
+                        CameraAvailabilityState.BUSY_EXTERNAL -> {
+                            chipLabel = "Cam ${cam.cameraId} (BUSY)"
+                            chipIcon = "⊘"
+                            chipBorderColor = Color.DarkGray
+                            chipContainerColor = Color(0xFF1B1B1B)
+                            chipLabelColor = Color.Gray
+                        }
+                        CameraAvailabilityState.DISABLED -> {
+                            chipLabel = "Cam ${cam.cameraId} (ERR)"
+                            chipIcon = "⚠"
+                            chipBorderColor = Color(0xFFD32F2F)
+                            chipContainerColor = Color(0xFF1B1B1B)
+                            chipLabelColor = Color(0xFFEF9A9A)
+                        }
+                    }
+
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = chipContainerColor,
+                        border = BorderStroke(1.dp, chipBorderColor),
+                        modifier = Modifier
+                            .height(28.dp)
+                            .clickable(enabled = availState != CameraAvailabilityState.BUSY_EXTERNAL && availState != CameraAvailabilityState.DISABLED) {
+                                if (availState == CameraAvailabilityState.ISP_SWITCHABLE) {
+                                    cameraManager.switchToSingleCamera(cam.cameraId)
+                                } else {
+                                    cameraManager.toggleCameraSelection(cam.cameraId)
+                                }
+                            }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
                             Text(
-                                text = "Cam ${cam.cameraId} (${cam.displayName.take(8)})",
+                                text = chipIcon,
                                 fontSize = 10.sp,
-                                fontFamily = FontFamily.Monospace
+                                color = chipBorderColor,
+                                fontWeight = FontWeight.Bold
                             )
-                        },
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = Color(0xFF00695C),
-                            selectedLabelColor = Color.White,
-                            containerColor = Color(0xFF212121),
-                            labelColor = Color.Gray
-                        ),
-                        modifier = Modifier.height(28.dp)
-                    )
+                            Text(
+                                text = chipLabel,
+                                fontSize = 10.sp,
+                                color = chipLabelColor,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = if (availState == CameraAvailabilityState.STREAMING) FontWeight.Bold else FontWeight.Normal
+                            )
+                        }
+                    }
                 }
             }
 
@@ -794,6 +883,8 @@ fun MultiCamScreen(
             HardwareDiagnosticsDialog(
                 cameras = discoveredCameras,
                 concurrentSets = concurrentSets,
+                concurrencyMode = cameraManager.hardwareConcurrencyMode.value,
+                availabilityStates = cameraManager.cameraAvailabilityStates,
                 onDismiss = { showDiagnosticsDialog = false }
             )
         }
@@ -892,23 +983,37 @@ fun QuickShareDialog(
                             shape = RoundedCornerShape(6.dp),
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Text(
-                                    text = "📱 ${node.name}",
-                                    fontSize = 12.sp,
-                                    color = Color.White,
-                                    fontFamily = FontFamily.Monospace
-                                )
-                                Text(
-                                    text = if (node.clockOffsetMs != 0L) "Sync: ${node.clockOffsetMs}ms" else "Connected",
-                                    fontSize = 11.sp,
-                                    color = Color(0xFF80CBC4),
-                                    fontFamily = FontFamily.Monospace
-                                )
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Text(
+                                        text = "📱 ${node.name}",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                    Text(
+                                        text = if (node.clockOffsetMs != 0L) "Sync: ${node.clockOffsetMs}ms" else "Connected",
+                                        fontSize = 11.sp,
+                                        color = Color(0xFF80CBC4),
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                }
+                                if (node.concurrencyMode.isNotEmpty() || node.activeCameras.isNotEmpty()) {
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    val modeLabel = if (node.concurrencyMode.contains("CONCURRENT")) "⚡ Dual-ISP Concurrent" else "📷 Single-ISP Mode"
+                                    val camsLabel = if (node.activeCameras.isNotEmpty()) "Active: Cam ${node.activeCameras.joinToString(", ")}" else "Waiting"
+                                    Text(
+                                        text = "$modeLabel • $camsLabel",
+                                        fontSize = 10.sp,
+                                        color = Color(0xFFFFD54F),
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                }
                             }
                         }
                     }

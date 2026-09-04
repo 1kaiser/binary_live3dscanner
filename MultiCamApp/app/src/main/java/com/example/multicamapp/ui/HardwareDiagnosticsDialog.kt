@@ -17,12 +17,16 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import com.example.multicamapp.camera.CameraAvailabilityState
 import com.example.multicamapp.camera.CameraDeviceInfo
+import com.example.multicamapp.camera.DeviceHardwareConcurrencyMode
 
 @Composable
 fun HardwareDiagnosticsDialog(
     cameras: List<CameraDeviceInfo>,
     concurrentSets: List<Set<String>>,
+    concurrencyMode: DeviceHardwareConcurrencyMode = DeviceHardwareConcurrencyMode.SINGLE_STREAM_ONLY,
+    availabilityStates: Map<String, CameraAvailabilityState> = emptyMap(),
     onDismiss: () -> Unit
 ) {
     Dialog(onDismissRequest = onDismiss) {
@@ -105,6 +109,23 @@ fun HardwareDiagnosticsDialog(
                                     color = Color.Gray,
                                     fontFamily = FontFamily.Monospace
                                 )
+                                val state = availabilityStates[cam.cameraId]
+                                if (state != null) {
+                                    Spacer(modifier = Modifier.height(3.dp))
+                                    Text(
+                                        text = "Status: $state",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = when (state) {
+                                            CameraAvailabilityState.STREAMING -> Color(0xFF69F0AE)
+                                            CameraAvailabilityState.AVAILABLE -> Color(0xFF80CBC4)
+                                            CameraAvailabilityState.ISP_SWITCHABLE -> Color(0xFFFFB74D)
+                                            CameraAvailabilityState.BUSY_EXTERNAL -> Color.Gray
+                                            CameraAvailabilityState.DISABLED -> Color(0xFFEF5350)
+                                        },
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                }
                             }
                         }
                     }

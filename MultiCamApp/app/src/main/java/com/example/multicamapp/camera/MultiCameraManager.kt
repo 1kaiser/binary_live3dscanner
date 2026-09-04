@@ -7,6 +7,7 @@ import android.hardware.camera2.*
 import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
+import android.os.Looper
 import android.util.Log
 import android.util.Size
 import android.view.Surface
@@ -54,6 +55,36 @@ class MultiCameraManager(private val context: Context) {
     // Hardware (GPU/ISP) acceleration toggle
     val isHwAccelerationEnabled = mutableStateOf(true)
 
+    // Hardware availability detector states
+    val hardwareConcurrencyMode = mutableStateOf(DeviceHardwareConcurrencyMode.SINGLE_STREAM_ONLY)
+    val osAvailableCameraIds = mutableStateOf<Set<String>>(emptySet())
+    val cameraAvailabilityStates = mutableStateMapOf<String, CameraAvailabilityState>()
+
+    var onCameraStateChanged: ((concurrencyMode: String, activeCameras: List<String>, availableCameras: List<String>) -> Unit)? = null
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+    private val availabilityCallback = object : CameraManager.AvailabilityCallback() {
+        override fun onCameraAvailable(cameraId: String) {
+            Log.d(TAG, "Hardware detector: Camera $cameraId is now OS AVAILABLE")
+            mainHandler.post {
+                val current = osAvailableCameraIds.value.toMutableSet()
+                current.add(cameraId)
+                osAvailableCameraIds.value = current
+                recomputeAvailabilityStates()
+            }
+        }
+
+        override fun onCameraUnavailable(cameraId: String) {
+            Log.d(TAG, "Hardware detector: Camera $cameraId is now OS UNAVAILABLE")
+            mainHandler.post {
+                val current = osAvailableCameraIds.value.toMutableSet()
+                current.remove(cameraId)
+                osAvailableCameraIds.value = current
+                recomputeAvailabilityStates()
+            }
+        }
+    }
+
     // Active sessions
     private val activeDevices = ConcurrentHashMap<String, CameraDevice>()
     private val activeSessions = ConcurrentHashMap<String, CameraCaptureSession>()
@@ -68,6 +99,11 @@ class MultiCameraManager(private val context: Context) {
     init {
         startBackgroundThread()
         discoverCameras()
+        try {
+            cameraManager.registerAvailabilityCallback(availabilityCallback, cameraHandler)
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to register Camera AvailabilityCallback", e)
+        }
     }
 
     private fun startBackgroundThread() {
@@ -183,6 +219,13 @@ class MultiCameraManager(private val context: Context) {
                 mainBack != null && front != null && set.contains(mainBack.cameraId) && set.contains(front.cameraId)
             }
 
+            hardwareConcurrencyMode.value = if (canRunConcurrent) {
+                DeviceHardwareConcurrencyMode.CONCURRENT_MULTI_CAM
+            } else {
+                DeviceHardwareConcurrencyMode.SINGLE_STREAM_ONLY
+            }
+            osAvailableCameraIds.value = list.map { it.cameraId }.toSet()
+
             if (canRunConcurrent) {
                 if (mainBack != null) defaultSelection.add(mainBack.cameraId)
                 if (front != null) defaultSelection.add(front.cameraId)
@@ -196,11 +239,51 @@ class MultiCameraManager(private val context: Context) {
             }
 
             selectedCameraIds.value = defaultSelection
-            Log.d(TAG, "Default camera selection: $defaultSelection (supportsConcurrent=$canRunConcurrent)")
+            Log.d(TAG, "Default camera selection: $defaultSelection (supportsConcurrent=$canRunConcurrent, mode=${hardwareConcurrencyMode.value})")
+            recomputeAvailabilityStates()
 
         } catch (e: Exception) {
             Log.e(TAG, "Error discovering cameras", e)
         }
+    }
+
+    fun recomputeAvailabilityStates() {
+        mainHandler.post {
+            val isConcurrent = hardwareConcurrencyMode.value == DeviceHardwareConcurrencyMode.CONCURRENT_MULTI_CAM
+            val active = activeDevices.keys.toSet()
+            val selected = selectedCameraIds.value
+
+            for (cam in discoveredCameras.value) {
+                val id = cam.cameraId
+                val status = streamStatuses[id]
+                val isActivelyStreaming = active.contains(id) || (selected.contains(id) && status?.state == CameraStreamState.STREAMING)
+
+                val state = when {
+                    isActivelyStreaming -> CameraAvailabilityState.STREAMING
+                    status?.state == CameraStreamState.ERROR -> CameraAvailabilityState.DISABLED
+                    !osAvailableCameraIds.value.contains(id) && !active.contains(id) -> CameraAvailabilityState.BUSY_EXTERNAL
+                    !isConcurrent && active.isNotEmpty() -> CameraAvailabilityState.ISP_SWITCHABLE
+                    isConcurrent && !canAddConcurrently(active, id) -> CameraAvailabilityState.ISP_SWITCHABLE
+                    else -> CameraAvailabilityState.AVAILABLE
+                }
+                cameraAvailabilityStates[id] = state
+            }
+
+            val activeList = selected.filter { active.contains(it) || streamStatuses[it]?.state == CameraStreamState.STREAMING }
+            val availList = discoveredCameras.value.map { it.cameraId }
+            onCameraStateChanged?.invoke(
+                hardwareConcurrencyMode.value.name,
+                activeList,
+                availList
+            )
+        }
+    }
+
+    private fun canAddConcurrently(active: Set<String>, candidateId: String): Boolean {
+        if (active.isEmpty() || active.contains(candidateId)) return true
+        if (concurrentCameraSets.value.isEmpty()) return false
+        val proposed = active + candidateId
+        return concurrentCameraSets.value.any { it.containsAll(proposed) }
     }
 
     fun toggleCameraSelection(cameraId: String) {
@@ -224,11 +307,13 @@ class MultiCameraManager(private val context: Context) {
                 reopenActiveStreams()
             }
         }
+        recomputeAvailabilityStates()
     }
 
     fun switchToSingleCamera(cameraId: String) {
         selectedCameraIds.value = setOf(cameraId)
         reopenActiveStreams()
+        recomputeAvailabilityStates()
     }
 
     fun setResolutionPreset(preset: ResolutionPreset) {
@@ -420,6 +505,7 @@ class MultiCameraManager(private val context: Context) {
                         state = CameraStreamState.ERROR,
                         errorMessage = errorMsg
                     )
+                    recomputeAvailabilityStates()
                 }
             }, handler)
         } catch (e: SecurityException) {
@@ -511,12 +597,14 @@ class MultiCameraManager(private val context: Context) {
                                 activeSize = size
                             )
                             Log.d(TAG, "Camera $cameraId streaming configured at ${size.width}x${size.height}")
+                            recomputeAvailabilityStates()
                         } catch (e: Exception) {
                             Log.e(TAG, "Failed to start repeating preview for camera $cameraId", e)
                             streamStatuses[cameraId] = CameraStreamStatus(
                                 state = CameraStreamState.ERROR,
                                 errorMessage = "Preview request failed"
                             )
+                            recomputeAvailabilityStates()
                         }
                     }
 
@@ -559,6 +647,7 @@ class MultiCameraManager(private val context: Context) {
             streamStatuses[cameraId] = CameraStreamStatus(state = CameraStreamState.STOPPED)
             isOpening[cameraId]?.set(false)
             Log.d(TAG, "Camera $cameraId closed cleanly")
+            recomputeAvailabilityStates()
         } catch (e: Exception) {
             Log.e(TAG, "Error closing camera $cameraId", e)
         }
@@ -605,6 +694,11 @@ class MultiCameraManager(private val context: Context) {
     }
 
     fun onDestroy() {
+        try {
+            cameraManager.unregisterAvailabilityCallback(availabilityCallback)
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to unregister availabilityCallback", e)
+        }
         closeAllCameras()
         stopBackgroundThread()
     }

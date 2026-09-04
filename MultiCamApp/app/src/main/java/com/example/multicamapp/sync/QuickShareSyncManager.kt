@@ -34,7 +34,10 @@ data class SyncNode(
     val name: String,
     val isConnected: Boolean = true,
     val clockOffsetMs: Long = 0L,
-    val lastPingMs: Long = System.currentTimeMillis()
+    val lastPingMs: Long = System.currentTimeMillis(),
+    val concurrencyMode: String = "",
+    val activeCameras: List<String> = emptyList(),
+    val availableCameras: List<String> = emptyList()
 )
 
 class QuickShareSyncManager(private val context: Context) {
@@ -425,9 +428,53 @@ class QuickShareSyncManager(private val context: Context) {
                         onSyncRecordStopTrigger?.invoke()
                     }
                 }
+                "DEVICE_STATUS" -> {
+                    val mode = json.optString("concurrencyMode", "")
+                    val actList = mutableListOf<String>()
+                    val actArr = json.optJSONArray("activeCameras")
+                    if (actArr != null) {
+                        for (i in 0 until actArr.length()) actList.add(actArr.getString(i))
+                    }
+                    val avList = mutableListOf<String>()
+                    val avArr = json.optJSONArray("availableCameras")
+                    if (avArr != null) {
+                        for (i in 0 until avArr.length()) avList.add(avArr.getString(i))
+                    }
+                    val existing = activeNodesMap[endpointId]
+                    if (existing != null) {
+                        activeNodesMap[endpointId] = existing.copy(
+                            concurrencyMode = mode,
+                            activeCameras = actList,
+                            availableCameras = avList
+                        )
+                        updateNodesList()
+                    }
+                }
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error handling incoming sync message", e)
+        }
+    }
+
+    fun broadcastDeviceStatus(
+        concurrencyMode: String,
+        activeCameras: List<String>,
+        availableCameras: List<String>
+    ) {
+        val payloadObj = JSONObject().apply {
+            put("action", "DEVICE_STATUS")
+            put("deviceName", localDeviceName)
+            put("concurrencyMode", concurrencyMode)
+            val actArr = org.json.JSONArray()
+            activeCameras.forEach { actArr.put(it) }
+            put("activeCameras", actArr)
+            val avArr = org.json.JSONArray()
+            availableCameras.forEach { avArr.put(it) }
+            put("availableCameras", avArr)
+        }
+        val msg = payloadObj.toString()
+        for (endpointId in activeNodesMap.keys) {
+            sendPayload(endpointId, msg)
         }
     }
 
