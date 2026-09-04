@@ -25,7 +25,7 @@ import com.example.multicamapp.camera.DeviceHardwareConcurrencyMode
 fun HardwareDiagnosticsDialog(
     cameras: List<CameraDeviceInfo>,
     concurrentSets: List<Set<String>>,
-    concurrencyMode: DeviceHardwareConcurrencyMode = DeviceHardwareConcurrencyMode.SINGLE_STREAM_ONLY,
+    concurrencyMode: DeviceHardwareConcurrencyMode = DeviceHardwareConcurrencyMode.DIRECT_HAL_MULTI_CAM,
     availabilityStates: Map<String, CameraAvailabilityState> = emptyMap(),
     onDismiss: () -> Unit
 ) {
@@ -119,7 +119,7 @@ fun HardwareDiagnosticsDialog(
                                         color = when (state) {
                                             CameraAvailabilityState.STREAMING -> Color(0xFF69F0AE)
                                             CameraAvailabilityState.AVAILABLE -> Color(0xFF80CBC4)
-                                            CameraAvailabilityState.ISP_SWITCHABLE -> Color(0xFFFFB74D)
+                                            CameraAvailabilityState.ERROR_LIMIT -> Color(0xFFFF5252)
                                             CameraAvailabilityState.BUSY_EXTERNAL -> Color.Gray
                                             CameraAvailabilityState.DISABLED -> Color(0xFFEF5350)
                                         },

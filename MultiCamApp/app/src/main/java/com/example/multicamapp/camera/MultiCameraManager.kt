@@ -56,7 +56,7 @@ class MultiCameraManager(private val context: Context) {
     val isHwAccelerationEnabled = mutableStateOf(true)
 
     // Hardware availability detector states
-    val hardwareConcurrencyMode = mutableStateOf(DeviceHardwareConcurrencyMode.SINGLE_STREAM_ONLY)
+    val hardwareConcurrencyMode = mutableStateOf(DeviceHardwareConcurrencyMode.DIRECT_HAL_MULTI_CAM)
     val osAvailableCameraIds = mutableStateOf<Set<String>>(emptySet())
     val cameraAvailabilityStates = mutableStateMapOf<String, CameraAvailabilityState>()
 
@@ -209,37 +209,27 @@ class MultiCameraManager(private val context: Context) {
                 }
             }
 
-            // Default selection: If device supports concurrent cameras, select Back + Front.
-            // If device DOES NOT support concurrent cameras (like Pixel 3a), default to 1 camera (Back Main)
+            // Default selection: Always keep multiple cameras available by default! (Back Main + Front Selfie)
             val defaultSelection = mutableSetOf<String>()
             val mainBack = list.firstOrNull { it.lensType == LensType.BACK_MAIN }
             val front = list.firstOrNull { it.lensType == LensType.FRONT }
 
-            val canRunConcurrent = concurrentCameraSets.value.any { set ->
-                mainBack != null && front != null && set.contains(mainBack.cameraId) && set.contains(front.cameraId)
+            if (mainBack != null) defaultSelection.add(mainBack.cameraId)
+            if (front != null) defaultSelection.add(front.cameraId)
+            if (defaultSelection.isEmpty() && list.isNotEmpty()) {
+                defaultSelection.add(list.first().cameraId)
             }
 
-            hardwareConcurrencyMode.value = if (canRunConcurrent) {
+            val hasApiConcurrent = concurrentCameraSets.value.isNotEmpty()
+            hardwareConcurrencyMode.value = if (hasApiConcurrent) {
                 DeviceHardwareConcurrencyMode.CONCURRENT_MULTI_CAM
             } else {
-                DeviceHardwareConcurrencyMode.SINGLE_STREAM_ONLY
+                DeviceHardwareConcurrencyMode.DIRECT_HAL_MULTI_CAM
             }
             osAvailableCameraIds.value = list.map { it.cameraId }.toSet()
 
-            if (canRunConcurrent) {
-                if (mainBack != null) defaultSelection.add(mainBack.cameraId)
-                if (front != null) defaultSelection.add(front.cameraId)
-            } else {
-                // Device does not support concurrent cameras (e.g. Pixel 3a): default to Main Back
-                if (mainBack != null) {
-                    defaultSelection.add(mainBack.cameraId)
-                } else if (list.isNotEmpty()) {
-                    defaultSelection.add(list.first().cameraId)
-                }
-            }
-
             selectedCameraIds.value = defaultSelection
-            Log.d(TAG, "Default camera selection: $defaultSelection (supportsConcurrent=$canRunConcurrent, mode=${hardwareConcurrencyMode.value})")
+            Log.d(TAG, "Default camera selection: $defaultSelection (hasApiConcurrent=$hasApiConcurrent)")
             recomputeAvailabilityStates()
 
         } catch (e: Exception) {
@@ -249,7 +239,6 @@ class MultiCameraManager(private val context: Context) {
 
     fun recomputeAvailabilityStates() {
         mainHandler.post {
-            val isConcurrent = hardwareConcurrencyMode.value == DeviceHardwareConcurrencyMode.CONCURRENT_MULTI_CAM
             val active = activeDevices.keys.toSet()
             val selected = selectedCameraIds.value
 
@@ -260,10 +249,8 @@ class MultiCameraManager(private val context: Context) {
 
                 val state = when {
                     isActivelyStreaming -> CameraAvailabilityState.STREAMING
-                    status?.state == CameraStreamState.ERROR -> CameraAvailabilityState.DISABLED
+                    status?.state == CameraStreamState.ERROR -> CameraAvailabilityState.ERROR_LIMIT
                     !osAvailableCameraIds.value.contains(id) && !active.contains(id) -> CameraAvailabilityState.BUSY_EXTERNAL
-                    !isConcurrent && active.isNotEmpty() -> CameraAvailabilityState.ISP_SWITCHABLE
-                    isConcurrent && !canAddConcurrently(active, id) -> CameraAvailabilityState.ISP_SWITCHABLE
                     else -> CameraAvailabilityState.AVAILABLE
                 }
                 cameraAvailabilityStates[id] = state
@@ -279,13 +266,6 @@ class MultiCameraManager(private val context: Context) {
         }
     }
 
-    private fun canAddConcurrently(active: Set<String>, candidateId: String): Boolean {
-        if (active.isEmpty() || active.contains(candidateId)) return true
-        if (concurrentCameraSets.value.isEmpty()) return false
-        val proposed = active + candidateId
-        return concurrentCameraSets.value.any { it.containsAll(proposed) }
-    }
-
     fun toggleCameraSelection(cameraId: String) {
         val current = selectedCameraIds.value.toMutableSet()
         if (current.contains(cameraId)) {
@@ -295,17 +275,10 @@ class MultiCameraManager(private val context: Context) {
                 reopenActiveStreams()
             }
         } else {
-            val hasConcurrentCapability = concurrentCameraSets.value.isNotEmpty()
-            val isComboSupported = hasConcurrentCapability && concurrentCameraSets.value.any { it.containsAll(current + cameraId) }
-            if (!isComboSupported) {
-                // Device does not support concurrent cameras (like Pixel 3a) or combo unsupported:
-                // seamlessly switch to this camera
-                switchToSingleCamera(cameraId)
-            } else {
-                current.add(cameraId)
-                selectedCameraIds.value = current
-                reopenActiveStreams()
-            }
+            // Keep multiple camera toggling available!
+            current.add(cameraId)
+            selectedCameraIds.value = current
+            reopenActiveStreams()
         }
         recomputeAvailabilityStates()
     }

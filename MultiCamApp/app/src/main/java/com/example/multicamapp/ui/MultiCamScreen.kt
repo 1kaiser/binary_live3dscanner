@@ -504,7 +504,7 @@ fun MultiCamScreen(
 
             Spacer(modifier = Modifier.height(6.dp))
 
-            // Row 2: Camera Selection Chips & Hardware Concurrency Detector
+            // Row 2: Camera Selection Chips & Multi-Camera Toggles
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -518,19 +518,17 @@ fun MultiCamScreen(
                     fontWeight = FontWeight.Bold
                 )
 
-                // Hardware ISP Concurrency Mode Badge
-                val concurrencyMode by cameraManager.hardwareConcurrencyMode
-                val isConcurrent = concurrencyMode == DeviceHardwareConcurrencyMode.CONCURRENT_MULTI_CAM
+                // Multi-Cam Mode Indicator
                 Surface(
                     shape = RoundedCornerShape(4.dp),
-                    color = if (isConcurrent) Color(0xFF004D40) else Color(0xFFE65100).copy(alpha = 0.25f),
-                    border = BorderStroke(1.dp, if (isConcurrent) Color(0xFF00E676) else Color(0xFFFF9800))
+                    color = Color(0xFF004D40),
+                    border = BorderStroke(1.dp, Color(0xFF00E676))
                 ) {
                     Text(
-                        text = if (isConcurrent) "⚡ DUAL-ISP" else "📷 SINGLE-ISP",
+                        text = "⚡ MULTI-CAM",
                         fontSize = 9.sp,
                         fontWeight = FontWeight.Bold,
-                        color = if (isConcurrent) Color(0xFF69F0AE) else Color(0xFFFFB74D),
+                        color = Color(0xFF69F0AE),
                         fontFamily = FontFamily.Monospace,
                         modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
                     )
@@ -538,51 +536,35 @@ fun MultiCamScreen(
 
                 discoveredCameras.forEach { cam ->
                     val isSel = selectedCameraIds.contains(cam.cameraId)
-                    val availState = cameraManager.cameraAvailabilityStates[cam.cameraId]
-                        ?: (if (isSel) CameraAvailabilityState.STREAMING else CameraAvailabilityState.AVAILABLE)
+                    val status = cameraManager.streamStatuses[cam.cameraId]
+                    val isStreaming = status?.state == com.example.multicamapp.camera.CameraStreamState.STREAMING
+                    val isError = isSel && status?.state == com.example.multicamapp.camera.CameraStreamState.ERROR
 
-                    val chipLabel: String
-                    val chipIcon: String
-                    val chipBorderColor: Color
-                    val chipContainerColor: Color
-                    val chipLabelColor: Color
+                    val chipBorderColor = when {
+                        isError -> Color(0xFFFF5252)
+                        isStreaming -> Color(0xFF00E676)
+                        isSel -> Color(0xFF80CBC4)
+                        else -> Color(0xFF424242)
+                    }
 
-                    when (availState) {
-                        CameraAvailabilityState.STREAMING -> {
-                            chipLabel = "Cam ${cam.cameraId} (${cam.displayName.take(7)})"
-                            chipIcon = "●"
-                            chipBorderColor = Color(0xFF00E676)
-                            chipContainerColor = Color(0xFF00695C)
-                            chipLabelColor = Color.White
-                        }
-                        CameraAvailabilityState.AVAILABLE -> {
-                            chipLabel = "Cam ${cam.cameraId} (+ADD)"
-                            chipIcon = "+"
-                            chipBorderColor = Color(0xFF00897B)
-                            chipContainerColor = Color(0xFF212121)
-                            chipLabelColor = Color(0xFF80CBC4)
-                        }
-                        CameraAvailabilityState.ISP_SWITCHABLE -> {
-                            chipLabel = "Cam ${cam.cameraId} (SWITCH)"
-                            chipIcon = "⇄"
-                            chipBorderColor = Color(0xFFFF9800)
-                            chipContainerColor = Color(0xFF262626)
-                            chipLabelColor = Color(0xFFFFCC80)
-                        }
-                        CameraAvailabilityState.BUSY_EXTERNAL -> {
-                            chipLabel = "Cam ${cam.cameraId} (BUSY)"
-                            chipIcon = "⊘"
-                            chipBorderColor = Color.DarkGray
-                            chipContainerColor = Color(0xFF1B1B1B)
-                            chipLabelColor = Color.Gray
-                        }
-                        CameraAvailabilityState.DISABLED -> {
-                            chipLabel = "Cam ${cam.cameraId} (ERR)"
-                            chipIcon = "⚠"
-                            chipBorderColor = Color(0xFFD32F2F)
-                            chipContainerColor = Color(0xFF1B1B1B)
-                            chipLabelColor = Color(0xFFEF9A9A)
-                        }
+                    val chipContainerColor = when {
+                        isError -> Color(0xFF4E1616)
+                        isStreaming -> Color(0xFF00695C)
+                        isSel -> Color(0xFF004D40)
+                        else -> Color(0xFF212121)
+                    }
+
+                    val chipLabelColor = when {
+                        isError -> Color(0xFFFF8A80)
+                        isSel -> Color.White
+                        else -> Color.LightGray
+                    }
+
+                    val chipIcon = when {
+                        isError -> "⚠"
+                        isStreaming -> "●"
+                        isSel -> "✓"
+                        else -> "+"
                     }
 
                     Surface(
@@ -591,12 +573,8 @@ fun MultiCamScreen(
                         border = BorderStroke(1.dp, chipBorderColor),
                         modifier = Modifier
                             .height(28.dp)
-                            .clickable(enabled = availState != CameraAvailabilityState.BUSY_EXTERNAL && availState != CameraAvailabilityState.DISABLED) {
-                                if (availState == CameraAvailabilityState.ISP_SWITCHABLE) {
-                                    cameraManager.switchToSingleCamera(cam.cameraId)
-                                } else {
-                                    cameraManager.toggleCameraSelection(cam.cameraId)
-                                }
+                            .clickable {
+                                cameraManager.toggleCameraSelection(cam.cameraId)
                             }
                     ) {
                         Row(
@@ -611,11 +589,11 @@ fun MultiCamScreen(
                                 fontWeight = FontWeight.Bold
                             )
                             Text(
-                                text = chipLabel,
+                                text = "Cam ${cam.cameraId} (${cam.displayName.take(7)})",
                                 fontSize = 10.sp,
                                 color = chipLabelColor,
                                 fontFamily = FontFamily.Monospace,
-                                fontWeight = if (availState == CameraAvailabilityState.STREAMING) FontWeight.Bold else FontWeight.Normal
+                                fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal
                             )
                         }
                     }
