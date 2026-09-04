@@ -62,6 +62,9 @@ dependencies {
     // ExifInterface for writing GPS and Camera metadata
     implementation("androidx.exifinterface:exifinterface:1.3.7")
 
+    // Google Nearby Connections (Quick Share underlying P2P engine)
+    implementation("com.google.android.gms:play-services-nearby:19.3.0")
+
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
 

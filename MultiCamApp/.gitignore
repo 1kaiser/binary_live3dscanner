@@ -14,3 +14,5 @@
 .cxx
 local.properties
 app/build/
+*.png
+captured_tests/

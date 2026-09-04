@@ -32,12 +32,13 @@ object MultiCamPhotoCapture {
         cameraFrames: List<Pair<String, Bitmap>>, // displayName to Bitmap
         location: Location?,
         isLandscape: Boolean = true,
+        customSessionId: String? = null,
         onProgress: (String) -> Unit
     ): List<String> = withContext(Dispatchers.IO) {
         val savedFiles = mutableListOf<String>()
         if (cameraFrames.isEmpty()) return@withContext savedFiles
 
-        val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+        val timestamp = customSessionId ?: SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
 
         // 1. Save individual photos
         for ((camName, bitmap) in cameraFrames) {

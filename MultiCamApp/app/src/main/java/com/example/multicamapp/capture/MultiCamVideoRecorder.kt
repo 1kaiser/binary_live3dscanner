@@ -38,6 +38,7 @@ class MultiCamVideoRecorder(private val context: Context) {
     private val shouldStopRecording = AtomicBoolean(false)
     private var tempOutputFile: File? = null
     private var recordStartTime = 0L
+    private var currentSessionId: String? = null
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private val timerRunnable = object : Runnable {
@@ -66,10 +67,12 @@ class MultiCamVideoRecorder(private val context: Context) {
         bitmapsProvider: () -> List<Pair<String, Bitmap>>,
         location: Location?,
         isLandscape: Boolean = true,
+        customSessionId: String? = null,
         onSuccess: (String) -> Unit,
         onError: (String) -> Unit
     ) {
         if (isRecording.value) return
+        currentSessionId = customSessionId
 
         try {
             val width = if (isLandscape) 1280 else 720
@@ -309,7 +312,7 @@ class MultiCamVideoRecorder(private val context: Context) {
     }
 
     private fun saveToMediaStore(sourceFile: File): String? {
-        val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+        val timestamp = currentSessionId ?: SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
         val fileName = "multicam_video_$timestamp.mp4"
 
         val values = ContentValues().apply {

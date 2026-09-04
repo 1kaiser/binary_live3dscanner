@@ -19,6 +19,7 @@ import androidx.core.content.ContextCompat
 import com.example.multicamapp.camera.MultiCameraManager
 import com.example.multicamapp.capture.MultiCamVideoRecorder
 import com.example.multicamapp.location.GpsLocationManager
+import com.example.multicamapp.sync.QuickShareSyncManager
 import com.example.multicamapp.ui.MultiCamScreen
 
 class MainActivity : ComponentActivity() {
@@ -26,6 +27,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var cameraManager: MultiCameraManager
     private lateinit var locationManager: GpsLocationManager
     private lateinit var videoRecorder: MultiCamVideoRecorder
+    private lateinit var syncManager: QuickShareSyncManager
 
     private var hasRequiredPermissions by mutableStateOf(false)
 
@@ -49,6 +51,7 @@ class MainActivity : ComponentActivity() {
         cameraManager = MultiCameraManager(applicationContext)
         locationManager = GpsLocationManager(applicationContext)
         videoRecorder = MultiCamVideoRecorder(applicationContext)
+        syncManager = QuickShareSyncManager(applicationContext)
 
         checkAndRequestPermissions()
 
@@ -64,7 +67,8 @@ class MainActivity : ComponentActivity() {
                     MultiCamScreen(
                         cameraManager = cameraManager,
                         locationManager = locationManager,
-                        videoRecorder = videoRecorder
+                        videoRecorder = videoRecorder,
+                        syncManager = syncManager
                     )
                 } else {
                     PermissionRequestScreen(
@@ -82,6 +86,15 @@ class MainActivity : ComponentActivity() {
             Manifest.permission.ACCESS_FINE_LOCATION,
             Manifest.permission.ACCESS_COARSE_LOCATION
         )
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            permissions.add(Manifest.permission.BLUETOOTH_SCAN)
+            permissions.add(Manifest.permission.BLUETOOTH_ADVERTISE)
+            permissions.add(Manifest.permission.BLUETOOTH_CONNECT)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            permissions.add(Manifest.permission.NEARBY_WIFI_DEVICES)
+        }
 
         if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
             permissions.add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
@@ -103,6 +116,7 @@ class MainActivity : ComponentActivity() {
         cameraManager.onDestroy()
         locationManager.onDestroy()
         videoRecorder.onDestroy()
+        syncManager.onDestroy()
     }
 }
 

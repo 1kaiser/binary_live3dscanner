@@ -38,6 +38,9 @@ import com.example.multicamapp.camera.ResolutionPreset
 import com.example.multicamapp.capture.MultiCamPhotoCapture
 import com.example.multicamapp.capture.MultiCamVideoRecorder
 import com.example.multicamapp.location.GpsLocationManager
+import com.example.multicamapp.sync.QuickShareSyncManager
+import com.example.multicamapp.sync.SyncNode
+import com.example.multicamapp.sync.SyncRole
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
@@ -47,7 +50,8 @@ import kotlin.math.roundToInt
 fun MultiCamScreen(
     cameraManager: MultiCameraManager,
     locationManager: GpsLocationManager,
-    videoRecorder: MultiCamVideoRecorder
+    videoRecorder: MultiCamVideoRecorder,
+    syncManager: QuickShareSyncManager
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -93,6 +97,13 @@ fun MultiCamScreen(
     // Status message / toast
     var statusMessage by remember { mutableStateOf<String?>(null) }
 
+    // Quick Share Sync States
+    val syncRole by syncManager.role.collectAsState()
+    val connectedNodes by syncManager.connectedNodes.collectAsState()
+    val isSearching by syncManager.isSearching.collectAsState()
+    val syncStatusText by syncManager.statusText.collectAsState()
+    var showQuickShareDialog by remember { mutableStateOf(false) }
+
     val activeCameras = remember(discoveredCameras, selectedCameraIds) {
         discoveredCameras.filter { selectedCameraIds.contains(it.cameraId) }
     }
@@ -112,6 +123,53 @@ fun MultiCamScreen(
                 val fullBmp = tv?.getBitmap(reqW, reqH) ?: tv?.bitmap
                 if (fullBmp != null) Pair(cam.displayName, fullBmp) else null
             }
+        }
+    }
+
+    // Register incoming sync callbacks from Master / Worker
+    DisposableEffect(syncManager) {
+        syncManager.onSyncPhotoTrigger = { sessionId ->
+            coroutineScope.launch {
+                showShutterFlash = true
+                val frames = getBitmapFrames()
+                if (frames.isNotEmpty()) {
+                    val saved = MultiCamPhotoCapture.captureSimultaneousPhotos(
+                        context = context,
+                        cameraFrames = frames,
+                        location = locationManager.currentLocation.value,
+                        isLandscape = isLandscape,
+                        customSessionId = sessionId,
+                        onProgress = { statusMessage = it }
+                    )
+                    statusMessage = "⚡ Sync Photo: Saved ${saved.size} photos ($sessionId)"
+                }
+                delay(100)
+                showShutterFlash = false
+            }
+        }
+        syncManager.onSyncRecordStartTrigger = { sessionId ->
+            if (!videoRecorder.isRecording.value) {
+                videoRecorder.startRecording(
+                    bitmapsProvider = getBitmapFrames,
+                    location = locationManager.currentLocation.value,
+                    isLandscape = isLandscape,
+                    customSessionId = sessionId,
+                    onSuccess = { statusMessage = "⚡ Sync Recording started ($sessionId)" },
+                    onError = { err -> statusMessage = "Record error: $err" }
+                )
+            }
+        }
+        syncManager.onSyncRecordStopTrigger = {
+            if (videoRecorder.isRecording.value) {
+                videoRecorder.stopRecording { savedUri ->
+                    statusMessage = if (savedUri != null) "⚡ Sync Video saved" else "Recording stopped"
+                }
+            }
+        }
+        onDispose {
+            syncManager.onSyncPhotoTrigger = null
+            syncManager.onSyncRecordStartTrigger = null
+            syncManager.onSyncRecordStopTrigger = null
         }
     }
 
@@ -356,6 +414,43 @@ fun MultiCamScreen(
                         }
                     }
 
+                    // Quick Share Multi-Device Sync Chip
+                    val syncChipColor = when (syncRole) {
+                        SyncRole.HOST -> Color(0xFF004D40)
+                        SyncRole.WORKER -> Color(0xFF0D47A1)
+                        SyncRole.STANDALONE -> Color(0xFF2C2C2C)
+                    }
+                    val syncChipBorder = when (syncRole) {
+                        SyncRole.HOST -> Color(0xFF00E676)
+                        SyncRole.WORKER -> Color(0xFF448AFF)
+                        SyncRole.STANDALONE -> Color.Gray.copy(alpha = 0.5f)
+                    }
+                    val syncChipText = when (syncRole) {
+                        SyncRole.HOST -> "📡 HOST (${connectedNodes.size})"
+                        SyncRole.WORKER -> if (connectedNodes.isNotEmpty()) "📡 NODE (SYNC)" else "📡 SEARCHING..."
+                        SyncRole.STANDALONE -> "📡 SYNC"
+                    }
+
+                    Surface(
+                        shape = RoundedCornerShape(20.dp),
+                        color = syncChipColor,
+                        border = androidx.compose.foundation.BorderStroke(1.dp, syncChipBorder),
+                        modifier = Modifier.clickable { showQuickShareDialog = true }
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = syncChipText,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (syncRole != SyncRole.STANDALONE) Color.White else Color.LightGray,
+                                fontFamily = FontFamily.Monospace
+                            )
+                        }
+                    }
+
                     // CPU Multi-Core Chip
                     Surface(
                         shape = RoundedCornerShape(20.dp),
@@ -563,17 +658,22 @@ fun MultiCamScreen(
                             .border(2.dp, if (isRecording) Color.Red else Color.White.copy(alpha = 0.6f), CircleShape)
                             .clickable {
                                 if (isRecording) {
-                                    videoRecorder.stopRecording { savedUri ->
-                                        statusMessage = if (savedUri != null) "Saved video: $savedUri" else "Recording finalized"
+                                    syncManager.triggerSynchronousRecordStop {
+                                        videoRecorder.stopRecording { savedUri ->
+                                            statusMessage = if (savedUri != null) "Saved video: $savedUri" else "Recording finalized"
+                                        }
                                     }
                                 } else {
-                                    videoRecorder.startRecording(
-                                        bitmapsProvider = getBitmapFrames,
-                                        location = locationManager.currentLocation.value,
-                                        isLandscape = isLandscape,
-                                        onSuccess = { statusMessage = "Recording started" },
-                                        onError = { err -> statusMessage = "Record error: $err" }
-                                    )
+                                    syncManager.triggerSynchronousRecordStart { sessionId ->
+                                        videoRecorder.startRecording(
+                                            bitmapsProvider = getBitmapFrames,
+                                            location = locationManager.currentLocation.value,
+                                            isLandscape = isLandscape,
+                                            customSessionId = sessionId,
+                                            onSuccess = { statusMessage = "Recording started ($sessionId)" },
+                                            onError = { err -> statusMessage = "Record error: $err" }
+                                        )
+                                    }
                                 }
                             },
                         contentAlignment = Alignment.Center
@@ -623,23 +723,26 @@ fun MultiCamScreen(
                             .clip(CircleShape)
                             .background(Color.White)
                             .clickable {
-                                coroutineScope.launch {
-                                    showShutterFlash = true
-                                    val frames = getBitmapFrames()
-                                    if (frames.isNotEmpty()) {
-                                        val saved = MultiCamPhotoCapture.captureSimultaneousPhotos(
-                                            context = context,
-                                            cameraFrames = frames,
-                                            location = locationManager.currentLocation.value,
-                                            isLandscape = isLandscape,
-                                            onProgress = { statusMessage = it }
-                                        )
-                                        statusMessage = "Saved ${saved.size} photos to Pictures/MultiCam"
-                                    } else {
-                                        statusMessage = "No camera frames available"
+                                syncManager.triggerSynchronousPhoto { sessionId ->
+                                    coroutineScope.launch {
+                                        showShutterFlash = true
+                                        val frames = getBitmapFrames()
+                                        if (frames.isNotEmpty()) {
+                                            val saved = MultiCamPhotoCapture.captureSimultaneousPhotos(
+                                                context = context,
+                                                cameraFrames = frames,
+                                                location = locationManager.currentLocation.value,
+                                                isLandscape = isLandscape,
+                                                customSessionId = sessionId,
+                                                onProgress = { statusMessage = it }
+                                            )
+                                            statusMessage = "Saved ${saved.size} photos locally"
+                                        } else {
+                                            statusMessage = "No camera frames available"
+                                        }
+                                        delay(100)
+                                        showShutterFlash = false
                                     }
-                                    delay(100)
-                                    showShutterFlash = false
                                 }
                             }
                     )
@@ -689,5 +792,181 @@ fun MultiCamScreen(
                 onDismiss = { showDiagnosticsDialog = false }
             )
         }
+
+        // 7. Quick Share Multi-Device Sync Dialog
+        if (showQuickShareDialog) {
+            QuickShareDialog(
+                syncManager = syncManager,
+                role = syncRole,
+                connectedNodes = connectedNodes,
+                isSearching = isSearching,
+                statusText = syncStatusText,
+                onDismiss = { showQuickShareDialog = false }
+            )
+        }
     }
+}
+
+@Composable
+fun QuickShareDialog(
+    syncManager: QuickShareSyncManager,
+    role: SyncRole,
+    connectedNodes: List<SyncNode>,
+    isSearching: Boolean,
+    statusText: String,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "📡 Quick Share Multi-Device Sync",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp,
+                    color = Color(0xFF69F0AE)
+                )
+            }
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(
+                    text = "Wirelessly pair multiple Android phones using Quick Share (Nearby Connections P2P) for synchronized photo clicks & video recording.",
+                    fontSize = 12.sp,
+                    color = Color.LightGray
+                )
+
+                // Current Status Box
+                Surface(
+                    color = Color(0xFF1E1E1E),
+                    shape = RoundedCornerShape(8.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF424242)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(10.dp)) {
+                        Text(
+                            text = "STATUS: $statusText",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = when (role) {
+                                SyncRole.HOST -> Color(0xFF69F0AE)
+                                SyncRole.WORKER -> Color(0xFF82B1FF)
+                                SyncRole.STANDALONE -> Color.White
+                            },
+                            fontFamily = FontFamily.Monospace
+                        )
+                        if (isSearching) {
+                            Spacer(modifier = Modifier.height(6.dp))
+                            LinearProgressIndicator(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(3.dp),
+                                color = Color(0xFF69F0AE)
+                            )
+                        }
+                    }
+                }
+
+                // Paired Nodes List
+                if (connectedNodes.isNotEmpty()) {
+                    Text(
+                        text = "Connected Devices (${connectedNodes.size}):",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color.White
+                    )
+                    connectedNodes.forEach { node ->
+                        Surface(
+                            color = Color(0xFF263238),
+                            shape = RoundedCornerShape(6.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = "📱 ${node.name}",
+                                    fontSize = 12.sp,
+                                    color = Color.White,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                                Text(
+                                    text = if (node.clockOffsetMs != 0L) "Sync: ${node.clockOffsetMs}ms" else "Connected",
+                                    fontSize = 11.sp,
+                                    color = Color(0xFF80CBC4),
+                                    fontFamily = FontFamily.Monospace
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Mode Selection Buttons
+                Text(
+                    text = "Select Device Mode:",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color.White
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Button(
+                        onClick = { syncManager.startHost() },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (role == SyncRole.HOST) Color(0xFF00E676) else Color(0xFF2E7D32)
+                        ),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(
+                            text = if (role == SyncRole.HOST) "✓ HOST" else "Be Host",
+                            color = if (role == SyncRole.HOST) Color.Black else Color.White,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    Button(
+                        onClick = { syncManager.startWorker() },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (role == SyncRole.WORKER) Color(0xFF448AFF) else Color(0xFF1565C0)
+                        ),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text(
+                            text = if (role == SyncRole.WORKER) "✓ WORKER" else "Be Worker",
+                            color = Color.White,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+
+                if (role != SyncRole.STANDALONE) {
+                    OutlinedButton(
+                        onClick = { syncManager.stopSync() },
+                        modifier = Modifier.fillMaxWidth(),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFF5252))
+                    ) {
+                        Text("Disconnect / Standalone", color = Color(0xFFFF5252), fontSize = 12.sp)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Close", color = Color(0xFF69F0AE), fontWeight = FontWeight.Bold)
+            }
+        },
+        containerColor = Color(0xFF121212)
+    )
 }
