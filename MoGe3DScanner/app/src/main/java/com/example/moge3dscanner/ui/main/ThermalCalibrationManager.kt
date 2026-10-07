@@ -21,7 +21,8 @@ import java.util.Locale
  */
 data class ThermalCalibration(
     val timestamp: String = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date()),
-    val thermalRotationDegrees: Int = 90,
+    val thermalRotationDegrees: Int = 0,
+    val isFlippedHorizontally: Boolean = true,
     val cornerA: Pair<Float, Float> = Pair(0.15f, 0.20f), // Top-Left (u, v)
     val cornerB: Pair<Float, Float> = Pair(0.85f, 0.20f), // Top-Right (u, v)
     val cornerC: Pair<Float, Float> = Pair(0.85f, 0.80f), // Bottom-Right (u, v)
@@ -31,6 +32,7 @@ data class ThermalCalibration(
         val json = JSONObject()
         json.put("timestamp", timestamp)
         json.put("thermal_rotation_degrees", thermalRotationDegrees)
+        json.put("is_flipped_horizontally", isFlippedHorizontally)
         
         val cornersObj = JSONObject()
         cornersObj.put("A", JSONObject().apply { put("u", cornerA.first); put("v", cornerA.second) })
@@ -47,7 +49,8 @@ data class ThermalCalibration(
             return try {
                 val json = JSONObject(jsonStr)
                 val ts = json.optString("timestamp", "")
-                val rot = json.optInt("thermal_rotation_degrees", 90)
+                val rot = json.optInt("thermal_rotation_degrees", 0)
+                val flipH = json.optBoolean("is_flipped_horizontally", true)
                 val corners = json.getJSONObject("corners_normalized")
                 
                 val a = corners.getJSONObject("A")
@@ -58,6 +61,7 @@ data class ThermalCalibration(
                 ThermalCalibration(
                     timestamp = ts,
                     thermalRotationDegrees = rot,
+                    isFlippedHorizontally = flipH,
                     cornerA = Pair(a.getDouble("u").toFloat(), a.getDouble("v").toFloat()),
                     cornerB = Pair(b.getDouble("u").toFloat(), b.getDouble("v").toFloat()),
                     cornerC = Pair(c.getDouble("u").toFloat(), c.getDouble("v").toFloat()),
@@ -130,6 +134,32 @@ object ThermalCalibrationManager {
     }
 
     /**
+     * Applies rotation and horizontal flipping to the thermal bitmap.
+     */
+    fun getTransformedThermalBitmap(
+        thermalBitmap: Bitmap,
+        calibration: ThermalCalibration
+    ): Bitmap {
+        val needsRotation = calibration.thermalRotationDegrees % 360 != 0
+        val needsFlip = calibration.isFlippedHorizontally
+        if (!needsRotation && !needsFlip) return thermalBitmap
+
+        val matrix = Matrix().apply {
+            if (needsRotation) {
+                postRotate(calibration.thermalRotationDegrees.toFloat())
+            }
+            if (needsFlip) {
+                postScale(-1f, 1f)
+            }
+        }
+        return Bitmap.createBitmap(
+            thermalBitmap, 0, 0,
+            thermalBitmap.width, thermalBitmap.height,
+            matrix, true
+        )
+    }
+
+    /**
      * Warps and blends the rotated thermal bitmap onto the high-resolution RGB bitmap
      * according to the 4-corner perspective calibration quad ABCD.
      */
@@ -146,23 +176,12 @@ object ThermalCalibrationManager {
         val fused = rgbBitmap.copy(Bitmap.Config.ARGB_8888, true)
         val canvas = Canvas(fused)
 
-        // 1. Rotate thermal image if required
-        val rotatedThermal = if (calibration.thermalRotationDegrees % 360 != 0) {
-            val rotMatrix = Matrix().apply {
-                postRotate(calibration.thermalRotationDegrees.toFloat())
-            }
-            Bitmap.createBitmap(
-                thermalBitmap, 0, 0,
-                thermalBitmap.width, thermalBitmap.height,
-                rotMatrix, true
-            )
-        } else {
-            thermalBitmap
-        }
+        // 1. Rotate and/or flip thermal image if required
+        val transformedThermal = getTransformedThermalBitmap(thermalBitmap, calibration)
 
         // 2. Set up 4-corner perspective transform matrix (poly-to-poly)
-        val thW = rotatedThermal.width.toFloat()
-        val thH = rotatedThermal.height.toFloat()
+        val thW = transformedThermal.width.toFloat()
+        val thH = transformedThermal.height.toFloat()
 
         val src = floatArrayOf(
             0f, 0f,         // A (Top-Left)
@@ -185,10 +204,10 @@ object ThermalCalibrationManager {
             val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply {
                 this.alpha = (alpha * 255).toInt().coerceIn(0, 255)
             }
-            canvas.drawBitmap(rotatedThermal, warpMatrix, paint)
+            canvas.drawBitmap(transformedThermal, warpMatrix, paint)
         } else {
             // Fallback: draw centered if degenerate quad
-            canvas.drawBitmap(rotatedThermal, 0f, 0f, null)
+            canvas.drawBitmap(transformedThermal, 0f, 0f, null)
         }
 
         return fused
@@ -210,21 +229,10 @@ object ThermalCalibrationManager {
 
         if (thermalBitmap == null) return pureThermal
 
-        val rotatedThermal = if (calibration.thermalRotationDegrees % 360 != 0) {
-            val rotMatrix = Matrix().apply {
-                postRotate(calibration.thermalRotationDegrees.toFloat())
-            }
-            Bitmap.createBitmap(
-                thermalBitmap, 0, 0,
-                thermalBitmap.width, thermalBitmap.height,
-                rotMatrix, true
-            )
-        } else {
-            thermalBitmap
-        }
+        val transformedThermal = getTransformedThermalBitmap(thermalBitmap, calibration)
 
-        val thW = rotatedThermal.width.toFloat()
-        val thH = rotatedThermal.height.toFloat()
+        val thW = transformedThermal.width.toFloat()
+        val thH = transformedThermal.height.toFloat()
 
         val src = floatArrayOf(
             0f, 0f,
@@ -245,9 +253,9 @@ object ThermalCalibrationManager {
 
         if (success) {
             val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
-            canvas.drawBitmap(rotatedThermal, warpMatrix, paint)
+            canvas.drawBitmap(transformedThermal, warpMatrix, paint)
         } else {
-            canvas.drawBitmap(rotatedThermal, 0f, 0f, null)
+            canvas.drawBitmap(transformedThermal, 0f, 0f, null)
         }
 
         return pureThermal

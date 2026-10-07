@@ -47,6 +47,7 @@ fun ThermalCalibrationInteractiveOverlay(
 ) {
     val context = LocalContext.current
     var thermalRotation by remember { mutableStateOf(initialCalibration.thermalRotationDegrees) }
+    var isFlippedHorizontally by remember { mutableStateOf(initialCalibration.isFlippedHorizontally) }
     var cornerA by remember { mutableStateOf(Offset(initialCalibration.cornerA.first, initialCalibration.cornerA.second)) }
     var cornerB by remember { mutableStateOf(Offset(initialCalibration.cornerB.first, initialCalibration.cornerB.second)) }
     var cornerC by remember { mutableStateOf(Offset(initialCalibration.cornerC.first, initialCalibration.cornerC.second)) }
@@ -71,6 +72,7 @@ fun ThermalCalibrationInteractiveOverlay(
             liveThermalBitmap?.let { rawTh ->
                 val cal = ThermalCalibration(
                     thermalRotationDegrees = thermalRotation,
+                    isFlippedHorizontally = isFlippedHorizontally,
                     cornerA = Pair(cornerA.x, cornerA.y),
                     cornerB = Pair(cornerB.x, cornerB.y),
                     cornerC = Pair(cornerC.x, cornerC.y),
@@ -210,12 +212,32 @@ fun ThermalCalibrationInteractiveOverlay(
                     thermalRotation = (thermalRotation + 90) % 360
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF24262B)),
-                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
+                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 6.dp),
                 shape = RoundedCornerShape(8.dp)
             ) {
                 Icon(Icons.Default.RotateRight, contentDescription = "Rotate", tint = Color(0xFF00E5FF), modifier = Modifier.size(16.dp))
-                Spacer(Modifier.width(4.dp))
+                Spacer(Modifier.width(2.dp))
                 Text("${thermalRotation}°", fontFamily = FontFamily.Monospace, fontSize = 10.sp, color = Color.White)
+            }
+
+            // Flip Horizontal Button
+            Button(
+                onClick = {
+                    isFlippedHorizontally = !isFlippedHorizontally
+                },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (isFlippedHorizontally) Color(0xFF00E5FF).copy(alpha = 0.25f) else Color(0xFF24262B)
+                ),
+                border = if (isFlippedHorizontally) androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF00E5FF)) else null,
+                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 6.dp),
+                shape = RoundedCornerShape(8.dp)
+            ) {
+                Text(
+                    text = if (isFlippedHorizontally) "⇄ Flip" else "→ Normal",
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 10.sp,
+                    color = if (isFlippedHorizontally) Color(0xFF00E5FF) else Color.White
+                )
             }
 
             // Alpha / Opacity Cycler Button
@@ -228,7 +250,7 @@ fun ThermalCalibrationInteractiveOverlay(
                     }
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF24262B)),
-                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
+                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 6.dp),
                 shape = RoundedCornerShape(8.dp)
             ) {
                 Text("Alpha ${(overlayAlpha * 100).toInt()}%", fontFamily = FontFamily.Monospace, fontSize = 10.sp, color = Color.White)
@@ -241,13 +263,15 @@ fun ThermalCalibrationInteractiveOverlay(
                     cornerB = Offset(0.85f, 0.20f)
                     cornerC = Offset(0.85f, 0.80f)
                     cornerD = Offset(0.15f, 0.80f)
+                    thermalRotation = 0
+                    isFlippedHorizontally = true
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF24262B)),
-                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
+                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 6.dp),
                 shape = RoundedCornerShape(8.dp)
             ) {
                 Icon(Icons.Default.Refresh, contentDescription = "Reset", tint = Color(0xFFFFB300), modifier = Modifier.size(16.dp))
-                Spacer(Modifier.width(4.dp))
+                Spacer(Modifier.width(2.dp))
                 Text("Reset", fontFamily = FontFamily.Monospace, fontSize = 10.sp, color = Color.White)
             }
 
@@ -256,6 +280,7 @@ fun ThermalCalibrationInteractiveOverlay(
                 onClick = {
                     val cal = ThermalCalibration(
                         thermalRotationDegrees = thermalRotation,
+                        isFlippedHorizontally = isFlippedHorizontally,
                         cornerA = Pair(cornerA.x, cornerA.y),
                         cornerB = Pair(cornerB.x, cornerB.y),
                         cornerC = Pair(cornerC.x, cornerC.y),
@@ -270,11 +295,11 @@ fun ThermalCalibrationInteractiveOverlay(
                     }
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00C853)),
-                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 6.dp),
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 6.dp),
                 shape = RoundedCornerShape(8.dp)
             ) {
                 Icon(Icons.Default.Save, contentDescription = "Save", tint = Color.White, modifier = Modifier.size(16.dp))
-                Spacer(Modifier.width(4.dp))
+                Spacer(Modifier.width(2.dp))
                 Text("Save", fontFamily = FontFamily.Monospace, fontSize = 10.sp, fontWeight = FontWeight.Bold, color = Color.White)
             }
 
