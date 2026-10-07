@@ -1127,10 +1127,18 @@ fun MainScreen(
                                                                  }
                                                              }
 
+                                                             val (prunedThermalPos, prunedThermalCol) = ThermalCalibrationManager.filterPointsInsideQuad(
+                                                                 positions = glPositions,
+                                                                 colors = thermalColors,
+                                                                 stride = 4,
+                                                                 isMoge3 = model.isMoge3,
+                                                                 calibration = activeCalibrationRef.get()
+                                                             )
+
                                                              val triple = TripleReconstructionResult(
                                                                  fused = Pair(glPositions.clone(), fusedColors.clone()),
                                                                  rgb = Pair(glPositions.clone(), rgbColors.clone()),
-                                                                 thermal = Pair(glPositions.clone(), thermalColors.clone())
+                                                                 thermal = Pair(prunedThermalPos, prunedThermalCol)
                                                              )
 
                                                              // Export triple 3D GLBs (Fused, Pure Thermal, Pure RGB) to Downloads
@@ -1138,7 +1146,7 @@ fun MainScreen(
                                                                  val lat = currentLatitude
                                                                  val lon = currentLongitude
                                                                  val glbFused = exportGlb(glPositions, fusedColors, lat, lon)
-                                                                 val glbThermal = exportGlb(glPositions, thermalColors, lat, lon)
+                                                                 val glbThermal = exportGlb(prunedThermalPos, prunedThermalCol, lat, lon)
                                                                  val glbRgb = exportGlb(glPositions, rgbColors, lat, lon)
 
                                                                  saveSnapshotGlb(context, glbFused, "moge_scan_${ts}_fused.glb")

@@ -179,9 +179,16 @@ object DatasetBatchProcessor {
                         rotatePoint3x3(glPositions, j * 3, rRel)
                     }
 
+                    val (prunedThermPos, prunedThermCol) = ThermalCalibrationManager.filterPointsInsideQuad(
+                        positions = glPositions,
+                        colors = thermalColors,
+                        stride = 4,
+                        isMoge3 = interpreter.isMoge3,
+                        calibration = calibration
+                    )
                     fusedAccumulator.addFrame(glPositions, fusedColors, accumulate = true)
                     rgbAccumulator.addFrame(glPositions, rgbColors, accumulate = true)
-                    thermalAccumulator.addFrame(glPositions, thermalColors, accumulate = true)
+                    thermalAccumulator.addFrame(prunedThermPos, prunedThermCol, accumulate = true)
                 }
             }
 

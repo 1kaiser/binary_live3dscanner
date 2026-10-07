@@ -206,7 +206,7 @@ object ThermalCalibrationManager {
     ): Bitmap {
         val pureThermal = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(pureThermal)
-        canvas.drawColor(android.graphics.Color.rgb(247, 246, 242)) // Light neutral original background
+        canvas.drawColor(android.graphics.Color.BLACK) // Pure black background for isolated thermal rendering
 
         if (thermalBitmap == null) return pureThermal
 
@@ -251,5 +251,72 @@ object ThermalCalibrationManager {
         }
 
         return pureThermal
+    }
+
+    /**
+     * Filters a dense 3D point cloud and corresponding color buffer so that only points
+     * lying strictly within the calibrated 4-corner perspective quad ABCD are retained.
+     */
+    fun filterPointsInsideQuad(
+        positions: FloatArray,
+        colors: FloatArray,
+        stride: Int,
+        isMoge3: Boolean,
+        calibration: ThermalCalibration
+    ): Pair<FloatArray, FloatArray> {
+        val outDim = if (isMoge3) 672 else 518
+        val stepsX = (outDim + stride - 1) / stride
+        val numPoints = positions.size / 3
+
+        val corners = arrayOf(
+            calibration.cornerA,
+            calibration.cornerB,
+            calibration.cornerC,
+            calibration.cornerD
+        )
+
+        var insideCount = 0
+        val insideFlags = BooleanArray(numPoints)
+        for (j in 0 until numPoints) {
+            val gridX = j % stepsX
+            val gridY = j / stepsX
+            val u = (gridX * stride).toFloat() / outDim
+            val v = (gridY * stride).toFloat() / outDim
+
+            var allPos = true
+            var allNeg = true
+            for (i in 0 until 4) {
+                val c1 = corners[i]
+                val c2 = corners[(i + 1) % 4]
+                val cp = (c2.first - c1.first) * (v - c1.second) - (c2.second - c1.second) * (u - c1.first)
+                if (cp < 0f) allPos = false
+                if (cp > 0f) allNeg = false
+            }
+            val inside = allPos || allNeg
+            insideFlags[j] = inside
+            if (inside) insideCount++
+        }
+
+        if (insideCount == 0) {
+            return Pair(positions, colors)
+        }
+
+        val prunedPos = FloatArray(insideCount * 3)
+        val prunedCol = FloatArray(insideCount * 3)
+        var outIdx = 0
+        for (j in 0 until numPoints) {
+            if (insideFlags[j]) {
+                prunedPos[outIdx * 3]     = positions[j * 3]
+                prunedPos[outIdx * 3 + 1] = positions[j * 3 + 1]
+                prunedPos[outIdx * 3 + 2] = positions[j * 3 + 2]
+
+                prunedCol[outIdx * 3]     = colors[j * 3]
+                prunedCol[outIdx * 3 + 1] = colors[j * 3 + 1]
+                prunedCol[outIdx * 3 + 2] = colors[j * 3 + 2]
+                outIdx++
+            }
+        }
+
+        return Pair(prunedPos, prunedCol)
     }
 }
