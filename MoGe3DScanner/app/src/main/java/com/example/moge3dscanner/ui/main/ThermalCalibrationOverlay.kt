@@ -263,7 +263,7 @@ fun ThermalCalibrationInteractiveOverlay(
                     cornerB = Offset(0.85f, 0.20f)
                     cornerC = Offset(0.85f, 0.80f)
                     cornerD = Offset(0.15f, 0.80f)
-                    thermalRotation = 0
+                    thermalRotation = 180
                     isFlippedHorizontally = true
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF24262B)),

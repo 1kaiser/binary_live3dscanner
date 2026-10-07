@@ -21,7 +21,7 @@ import java.util.Locale
  */
 data class ThermalCalibration(
     val timestamp: String = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date()),
-    val thermalRotationDegrees: Int = 0,
+    val thermalRotationDegrees: Int = 180,
     val isFlippedHorizontally: Boolean = true,
     val cornerA: Pair<Float, Float> = Pair(0.15f, 0.20f), // Top-Left (u, v)
     val cornerB: Pair<Float, Float> = Pair(0.85f, 0.20f), // Top-Right (u, v)
@@ -49,7 +49,7 @@ data class ThermalCalibration(
             return try {
                 val json = JSONObject(jsonStr)
                 val ts = json.optString("timestamp", "")
-                val rot = json.optInt("thermal_rotation_degrees", 0)
+                val rot = json.optInt("thermal_rotation_degrees", 180)
                 val flipH = json.optBoolean("is_flipped_horizontally", true)
                 val corners = json.getJSONObject("corners_normalized")
                 
@@ -76,7 +76,7 @@ data class ThermalCalibration(
 }
 
 object ThermalCalibrationManager {
-    private const val PREFS_NAME = "moge_thermal_calibration"
+    private const val PREFS_NAME = "moge_thermal_calibration_v2"
     private const val KEY_ACTIVE_CALIBRATION = "active_calibration_json"
     private const val TAG = "ThermalCalibration"
 
