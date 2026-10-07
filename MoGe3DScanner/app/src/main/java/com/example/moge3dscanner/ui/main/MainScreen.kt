@@ -119,6 +119,25 @@ private fun saveSnapshotRaw(context: Context, rawData: ShortArray, fileName: Str
     }
 }
 
+private fun saveSnapshotGlb(context: Context, glbBytes: ByteArray, fileName: String) {
+    try {
+        val contentValues = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+            put(MediaStore.MediaColumns.MIME_TYPE, "model/gltf-binary")
+            put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+        }
+        val resolver = context.contentResolver
+        val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
+        if (uri != null) {
+            resolver.openOutputStream(uri)?.use { out ->
+                out.write(glbBytes)
+            }
+        }
+    } catch (e: Exception) {
+        Log.e("MainScreen", "Failed to save glb $fileName", e)
+    }
+}
+
 enum class FullscreenMode {
     NONE, THERMAL, CAMERA
 }
@@ -1023,18 +1042,24 @@ fun MainScreen(
                                                      bitmap
                                                  }
 
-                                                 // Save both feeds when snapshot is captured
+                                                 // Save feeds when snapshot is captured
                                                  val ts = System.currentTimeMillis()
                                                  saveSnapshotBitmap(context, rotatedBitmap, "moge_rgb_$ts.png")
-                                                 if (isThermalEnabled) {
-                                                     val thermalBmp = thermalManager.captureFrame()
-                                                     if (thermalBmp != null) {
-                                                         saveSnapshotBitmap(context, thermalBmp, "moge_thermal_$ts.png")
-                                                     }
+                                                 val capturedThermalBmp = if (isThermalEnabled) (lastThermalBitmap ?: thermalManager.captureFrame()) else null
+                                                 if (capturedThermalBmp != null) {
+                                                     saveSnapshotBitmap(context, capturedThermalBmp, "moge_thermal_$ts.png")
                                                      val thermalRaw = thermalManager.captureRaw()
                                                      if (thermalRaw != null) {
                                                          saveSnapshotRaw(context, thermalRaw, "moge_thermal_$ts.raw")
                                                      }
+                                                     // 1. Thermal over 2D frame (perspective homography registered)
+                                                     val fused2D = ThermalCalibrationManager.createFusedColorBitmap(
+                                                         rgbBitmap = rotatedBitmap,
+                                                         thermalBitmap = capturedThermalBmp,
+                                                         calibration = activeCalibrationRef.get(),
+                                                         alpha = 1.0f
+                                                     )
+                                                     saveSnapshotBitmap(context, fused2D, "moge_fused_$ts.png")
                                                  }
 
                                                  val R_i = synchronized(captureRotationMatrix) { captureRotationMatrix.clone() }
@@ -1061,8 +1086,8 @@ fun MainScreen(
                                                          Handler(Looper.getMainLooper()).post {
                                                             isProcessingFrame = true
                                                          }
-                                                         val thermalBmp = if (isThermalEnabled) lastThermalBitmap else null
-                                                         val colorBitmap = if (thermalBmp != null) {
+                                                         val thermalBmp = capturedThermalBmp ?: if (isThermalEnabled) lastThermalBitmap else null
+                                                         val fusedColorBitmap = if (thermalBmp != null) {
                                                              ThermalCalibrationManager.createFusedColorBitmap(
                                                                  rgbBitmap = rotatedBitmap,
                                                                  thermalBitmap = thermalBmp,
@@ -1072,10 +1097,23 @@ fun MainScreen(
                                                          } else {
                                                              rotatedBitmap
                                                          }
-                                                         val result = model.runInferenceWithColor(rotatedBitmap, colorBitmap, stride = 4)
+                                                         val pureThermalColorBitmap = if (thermalBmp != null) {
+                                                             ThermalCalibrationManager.createPureThermalColorBitmap(
+                                                                 width = rotatedBitmap.width,
+                                                                 height = rotatedBitmap.height,
+                                                                 thermalBitmap = thermalBmp,
+                                                                 calibration = activeCalibrationRef.get()
+                                                             )
+                                                         } else {
+                                                             rotatedBitmap
+                                                         }
+                                                         val result = model.runInferenceWithColor(rotatedBitmap, fusedColorBitmap, stride = 4)
                                                          if (result != null) {
                                                              val positions = result.first
-                                                             val colors = result.second
+                                                             val fusedColors = result.second
+                                                             val rgbColors = model.sampleColors(rotatedBitmap, stride = 4)
+                                                             val thermalColors = model.sampleColors(pureThermalColorBitmap, stride = 4)
+
                                                              val numPoints = positions.size / 3
                                                              val glPositions = FloatArray(positions.size)
                                                              for (j in 0 until numPoints) {
@@ -1088,10 +1126,31 @@ fun MainScreen(
                                                                      rotatePoint3x3(glPositions, j * 3, R_rel)
                                                                  }
                                                              }
+
+                                                             val triple = TripleReconstructionResult(
+                                                                 fused = Pair(glPositions.clone(), fusedColors.clone()),
+                                                                 rgb = Pair(glPositions.clone(), rgbColors.clone()),
+                                                                 thermal = Pair(glPositions.clone(), thermalColors.clone())
+                                                             )
+
+                                                             // Export triple 3D GLBs (Fused, Pure Thermal, Pure RGB) to Downloads
+                                                             if (!isContinuousScanning) {
+                                                                 val lat = currentLatitude
+                                                                 val lon = currentLongitude
+                                                                 val glbFused = exportGlb(glPositions, fusedColors, lat, lon)
+                                                                 val glbThermal = exportGlb(glPositions, thermalColors, lat, lon)
+                                                                 val glbRgb = exportGlb(glPositions, rgbColors, lat, lon)
+
+                                                                 saveSnapshotGlb(context, glbFused, "moge_scan_${ts}_fused.glb")
+                                                                 saveSnapshotGlb(context, glbThermal, "moge_scan_${ts}_thermal.glb")
+                                                                 saveSnapshotGlb(context, glbRgb, "moge_scan_${ts}_rgb.glb")
+                                                             }
+
                                                              val accumulate = isContinuousScanning || isMultiModeSnapshot.get()
-                                                             accumulator.addFrame(glPositions, colors, accumulate)
+                                                             accumulator.addFrame(glPositions, fusedColors, accumulate)
                                                              val (mergedPositions, mergedColors) = accumulator.getPositionsAndColors()
                                                              Handler(Looper.getMainLooper()).post {
+                                                                 lastTripleResult = triple
                                                                  lastPositions = mergedPositions
                                                                  lastColors = mergedColors
                                                                  renderer.updatePoints(mergedPositions, mergedColors)
@@ -1266,9 +1325,33 @@ fun MainScreen(
                     .background(Color.White)
                     .border(1.5.dp, Color.Black, RoundedCornerShape(16.dp))
                     .clickable {
+                        val triple = lastTripleResult
                         val positions = lastPositions
                         val colors = lastColors
-                        if (positions != null && colors != null) {
+                        if (triple != null) {
+                            try {
+                                val ts = System.currentTimeMillis()
+                                val glbFused = exportGlb(triple.fused.first, triple.fused.second, currentLatitude, currentLongitude)
+                                val glbThermal = exportGlb(triple.thermal.first, triple.thermal.second, currentLatitude, currentLongitude)
+                                val glbRgb = exportGlb(triple.rgb.first, triple.rgb.second, currentLatitude, currentLongitude)
+
+                                saveSnapshotGlb(context, glbFused, "moge_scan_${ts}_fused.glb")
+                                saveSnapshotGlb(context, glbThermal, "moge_scan_${ts}_thermal.glb")
+                                saveSnapshotGlb(context, glbRgb, "moge_scan_${ts}_rgb.glb")
+
+                                val activeGlb = when (activeColorMode) {
+                                    PointCloudColorMode.FUSED -> glbFused
+                                    PointCloudColorMode.RGB -> glbRgb
+                                    PointCloudColorMode.THERMAL -> glbThermal
+                                }
+                                modelGlbBytes = activeGlb
+                                isViewingModel = true
+                                val gpsTag = if (currentLatitude != null && currentLongitude != null) " (GPS tagged)" else ""
+                                Toast.makeText(context, "Triple GLBs (Fused, Thermal, RGB) saved to Downloads!$gpsTag", Toast.LENGTH_SHORT).show()
+                            } catch (e: Exception) {
+                                Toast.makeText(context, "Export error: ${e.message}", Toast.LENGTH_SHORT).show()
+                            }
+                        } else if (positions != null && colors != null) {
                             try {
                                 val glbData = exportGlb(positions, colors, currentLatitude, currentLongitude)
                                 val contentValues = ContentValues().apply {
