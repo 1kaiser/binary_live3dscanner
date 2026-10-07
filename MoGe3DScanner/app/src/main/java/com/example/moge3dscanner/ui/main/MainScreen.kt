@@ -251,6 +251,7 @@ class InteractiveGLView(context: Context, val renderer: GLPointRenderer) : GLSur
 
     private var previousMidX = 0f
     private var previousMidY = 0f
+    private var previousAngle = 0f
     private var isTwoFingerGesture = false
 
     private val scaleDetector = ScaleGestureDetector(context, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
@@ -277,19 +278,25 @@ class InteractiveGLView(context: Context, val renderer: GLPointRenderer) : GLSur
         val pointerCount = event.pointerCount
 
         if (pointerCount >= 2) {
-            val midX = (event.getX(0) + event.getX(1)) / 2f
-            val midY = (event.getY(0) + event.getY(1)) / 2f
+            val p0x = event.getX(0)
+            val p0y = event.getY(0)
+            val p1x = event.getX(1)
+            val p1y = event.getY(1)
+            val midX = (p0x + p1x) / 2f
+            val midY = (p0y + p1y) / 2f
+            val curAngle = Math.toDegrees(Math.atan2((p1y - p0y).toDouble(), (p1x - p0x).toDouble())).toFloat()
 
             when (event.actionMasked) {
                 MotionEvent.ACTION_POINTER_DOWN -> {
                     isTwoFingerGesture = true
                     previousMidX = midX
                     previousMidY = midY
+                    previousAngle = curAngle
                     renderer.yawVelocity = 0f
                     renderer.pitchVelocity = 0f
                 }
                 MotionEvent.ACTION_MOVE -> {
-                    if (isTwoFingerGesture && !scaleDetector.isInProgress) {
+                    if (isTwoFingerGesture) {
                         val dx = midX - previousMidX
                         val dy = midY - previousMidY
 
@@ -298,8 +305,15 @@ class InteractiveGLView(context: Context, val renderer: GLPointRenderer) : GLSur
                         renderer.targetPanX += dx * sensitivity
                         renderer.targetPanY -= dy * sensitivity
 
+                        // 2-finger twist roll rotation
+                        var dAngle = curAngle - previousAngle
+                        if (dAngle > 180f) dAngle -= 360f
+                        if (dAngle < -180f) dAngle += 360f
+                        renderer.targetRoll += dAngle
+
                         previousMidX = midX
                         previousMidY = midY
+                        previousAngle = curAngle
                         requestRender()
                     }
                 }
@@ -336,7 +350,7 @@ class InteractiveGLView(context: Context, val renderer: GLPointRenderer) : GLSur
                         val dPitch = dy * rotSensitivity
 
                         renderer.targetYaw += dYaw
-                        renderer.targetPitch = (renderer.targetPitch + dPitch).coerceIn(-85f, 85f)
+                        renderer.targetPitch += dPitch // Free unconstrained vertical tilt (no lock)
 
                         renderer.yawVelocity = dYaw * 0.4f
                         renderer.pitchVelocity = dPitch * 0.4f

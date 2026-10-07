@@ -56,8 +56,10 @@ class GLPointRenderer : GLSurfaceView.Renderer {
     // Orbital Euler Angles (in degrees)
     var yaw: Float = 0f              // Azimuth (horizontal spin around Y axis)
     var pitch: Float = 0f            // Elevation (vertical tilt around X axis)
+    var roll: Float = 0f             // Roll (twist around Z axis)
     var targetYaw: Float = 0f
     var targetPitch: Float = 0f
+    var targetRoll: Float = 0f
 
     // Zoom distance & Pan offsets
     var zoom: Float = 3.0f
@@ -84,8 +86,10 @@ class GLPointRenderer : GLSurfaceView.Renderer {
     fun resetAngles() {
         targetYaw = 0f
         targetPitch = 0f
+        targetRoll = 0f
         yaw = 0f
         pitch = 0f
+        roll = 0f
         targetZoom = 3.0f
         zoom = 3.0f
         targetPanX = 0f
@@ -96,6 +100,7 @@ class GLPointRenderer : GLSurfaceView.Renderer {
         pitchVelocity = 0f
         isTouching = false
         lastFrameTimeNs = 0L
+        Matrix.setIdentityM(gravityAlignMatrix, 0)
     }
 
     @Synchronized
@@ -186,12 +191,14 @@ class GLPointRenderer : GLSurfaceView.Renderer {
 
         val diffYaw = targetYaw - yaw
         val diffPitch = targetPitch - pitch
+        val diffRoll = targetRoll - roll
         val diffZoom = targetZoom - zoom
         val diffPanX = targetPanX - panX
         val diffPanY = targetPanY - panY
 
         val isAnimating = Math.abs(diffYaw) > 0.05f ||
                 Math.abs(diffPitch) > 0.05f ||
+                Math.abs(diffRoll) > 0.05f ||
                 Math.abs(diffZoom) > 0.005f ||
                 Math.abs(diffPanX) > 0.001f ||
                 Math.abs(diffPanY) > 0.001f ||
@@ -201,6 +208,7 @@ class GLPointRenderer : GLSurfaceView.Renderer {
         if (isAnimating) {
             yaw += diffYaw * factor
             pitch += diffPitch * factor
+            roll += diffRoll * factor
             zoom += diffZoom * factor
             panX += diffPanX * factor
             panY += diffPanY * factor
@@ -208,6 +216,7 @@ class GLPointRenderer : GLSurfaceView.Renderer {
         } else {
             yaw = targetYaw
             pitch = targetPitch
+            roll = targetRoll
             zoom = targetZoom
             panX = targetPanX
             panY = targetPanY
@@ -218,7 +227,7 @@ class GLPointRenderer : GLSurfaceView.Renderer {
         Matrix.setLookAtM(vMatrix, 0, 0f, 0f, zoom, 0f, 0f, 0f, 0f, 1f, 0f)
         Matrix.translateM(vMatrix, 0, panX, panY, 0f)
 
-        // 4. Model Matrix: Pitch & Yaw Turntable Rotation centered around point cloud centroid
+        // 4. Model Matrix: Free 3-axis Rotation centered around point cloud centroid
         val modelMatrix = FloatArray(16)
         Matrix.setIdentityM(modelMatrix, 0)
 
@@ -226,6 +235,8 @@ class GLPointRenderer : GLSurfaceView.Renderer {
         Matrix.rotateM(modelMatrix, 0, pitch, 1f, 0f, 0f)
         // Yaw spin (azimuth)
         Matrix.rotateM(modelMatrix, 0, yaw, 0f, 1f, 0f)
+        // Roll twist (rotation around viewing axis)
+        Matrix.rotateM(modelMatrix, 0, roll, 0f, 0f, 1f)
 
         // Multiply gravity base alignment
         val gravModel = FloatArray(16)
