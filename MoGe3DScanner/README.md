@@ -26,10 +26,23 @@ Crafted with **[Gemini 3.7](https://blog.google/technology/google-deepmind/gemin
 
 ---
 
+## 📥 Pre-Built APK Downloads & Releases
+
+Direct download links for official release binaries on [GitHub Releases](https://github.com/1kaiser/binary_live3dscanner/releases):
+
+* **[MoGe-3D Scanner v2.0 (Latest Release)](https://github.com/1kaiser/binary_live3dscanner/releases/tag/v2.0)**
+  * Direct APK download: [**`MoGe3DScanner_v2.0.apk`**](https://github.com/1kaiser/binary_live3dscanner/releases/download/v2.0/MoGe3DScanner_v2.0.apk) (**456 MB**, self-contained offline build including MoGe-3 INT8 model)
+  * Features MoGe-3 monocular metric depth in meters, 2D thermal-over-frame homography fusion, and triple GLB generation.
+* **Historical Releases (`v3` to `v32`)**: All 30 legacy release archives are cataloged with version tags on [GitHub Releases](https://github.com/1kaiser/binary_live3dscanner/releases).
+
+---
+
 ## 🌟 Key Features
 
-1. **On-Device Monocular Depth Estimation**:
-   Uses a quantized `moge_v2_fp16.tflite` model running locally via TensorFlow Lite, with support for GPU delegation and CPU (XNNPACK) fallback.
+1. **On-Device Monocular Metric 3D Geometry (MoGe-3 & MoGe v2)**:
+   - **MoGe-3 LiteRT INT8 (ViT-L)**: Monocular metric 3D point cloud estimation in true meters. Remaps factorized coordinates $(X/Z, Y/Z, \log Z)$ into metric space using $Z = \exp(\log Z) \cdot \exp(s)$, $X = (X/Z) \cdot Z$, $Y = (Y/Z) \cdot Z$.
+   - **MoGe v2 FP16**: Legacy lightweight depth model with direct coordinate outputs.
+   - Dynamic architecture auto-detection and hardware-accelerated GPU / CPU (XNNPACK) fallback.
 
 2. **Thermal Radiometry & Celsius (°C) Integration**:
    - Seamlessly connects to UVC thermal cameras (HT-203U, InfiRay T2/T3, HIKMICRO `VID:0x2bdf PID:0x0102`) using the standard Android USB Host API.
@@ -59,9 +72,12 @@ Crafted with **[Gemini 3.7](https://blog.google/technology/google-deepmind/gemin
    Tapping the shutter button automatically captures and archives all data to `/sdcard/Download/`:
    - `moge_rgb_<timestamp>.png`: Full-resolution RGB photo.
    - `moge_thermal_<timestamp>.png`: Colorized thermal heatmap snapshot.
+   - `moge_fused_<timestamp>.png`: Calibrated 2D composite image with thermal false-color heatmap warped over natural RGB frame.
    - `moge_thermal_<timestamp>.raw`: Raw 16-bit radiometric microbolometer counts.
    - `moge_calibration_<timestamp>.json`: Calibrated 4-corner perspective and rotation metadata.
-   - `moge_scan_<timestamp>.glb`: 3D point cloud mesh textured with thermal data.
+   - `moge_scan_<timestamp>_fused.glb`: 3D mesh combining RGB depth estimation textured with calibrated thermal heatmap data.
+   - `moge_scan_<timestamp>_thermal.glb`: Pure thermal 3D mesh on isolated neutral background.
+   - `moge_scan_<timestamp>_rgb.glb`: Pure optical high-resolution RGB 3D mesh.
 
 7. **Turntable Orbital Controls**:
    - **Single-finger drag left/right**: Spins the model around its world-vertical Y-axis.

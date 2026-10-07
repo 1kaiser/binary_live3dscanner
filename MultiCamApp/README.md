@@ -6,6 +6,15 @@ Inspired by the user experience and floating card architecture of [MoGe3DScanner
 
 ---
 
+## 📥 Pre-Built APK Downloads & Releases
+
+Download the official release binary on [GitHub Releases](https://github.com/1kaiser/binary_live3dscanner/releases):
+
+* **[MultiCam Live v1.0](https://github.com/1kaiser/binary_live3dscanner/releases/tag/multicam-v1.0)**
+  * Direct APK download: [**`multicam_live_v1.apk`**](https://github.com/1kaiser/binary_live3dscanner/releases/download/multicam-v1.0/multicam_live_v1.apk) (20 MB)
+
+---
+
 ## 🌟 Key Features
 
 1. **Concurrent Multi-Camera Streaming (Camera2 API)**:
