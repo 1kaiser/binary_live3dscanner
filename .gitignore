@@ -10,3 +10,4 @@ captures/
 
 # Large model files (>100MB, hosted on Hugging Face 1kaiser/moge3-litert)
 MoGe3DScanner/app/src/main/assets/moge3_dense_stage_weight_only_int8.tflite
+*.apk

@@ -11,7 +11,8 @@ A comprehensive collection of on-device 3D reconstruction, multi-sensor computer
 * **2D Thermal Frame Fusion**: Registered 16-bit radiometric thermal heatmap over RGB frames via hardware-accelerated 4-corner perspective homography (`moge_fused_<ts>.png`).
 * **Triple 3D GLB Generation**: Simultaneous generation and real-time in-app switching between **Fused 3D**, **Pure Thermal 3D**, and **Pure RGB 3D** models.
 * **Native 3D Viewers**: Turntable orbital controls rendered via **Google Filament** and Google **`<model-viewer>`**.
-* 📥 **[Download MoGe3DScanner v2.0 APK](https://github.com/1kaiser/binary_live3dscanner/releases/tag/v2.0)**
+* 📥 **[Download MoGe3DScanner v2.0 (MoGe-3 Metric, 456 MB)](https://github.com/1kaiser/binary_live3dscanner/releases/download/v2.0/MoGe3DScanner_v2.0.apk)**
+* 📥 **[Download MoGe3DScanner v2.0 (MoGe v2 Lightweight, 132 MB)](https://github.com/1kaiser/binary_live3dscanner/releases/download/v2.0/MoGe3DScanner_v2.0_moge2.apk)**
 
 ### 2. [MultiCamApp](./MultiCamApp) — Concurrent Multi-Camera & Dual Recording
 * Streams, photographs, and records from multiple camera sensors concurrently (Front, Rear Main, Rear Aux/Depth) using Camera2 APIs.
@@ -24,9 +25,9 @@ A comprehensive collection of on-device 3D reconstruction, multi-sensor computer
 
 Pre-compiled APKs and historical release archives are hosted under [GitHub Releases](https://github.com/1kaiser/binary_live3dscanner/releases):
 
-| Application | Latest Version | Release Page |
+| Application | Latest Version | Release Assets |
 | :--- | :--- | :--- |
-| **MoGe3DScanner** | **v2.0** | [Release v2.0](https://github.com/1kaiser/binary_live3dscanner/releases/tag/v2.0) |
+| **MoGe3DScanner** | **v2.0** | [Release v2.0](https://github.com/1kaiser/binary_live3dscanner/releases/tag/v2.0) ([MoGe-3 456MB](https://github.com/1kaiser/binary_live3dscanner/releases/download/v2.0/MoGe3DScanner_v2.0.apk) \| [MoGe-2 132MB](https://github.com/1kaiser/binary_live3dscanner/releases/download/v2.0/MoGe3DScanner_v2.0_moge2.apk)) |
 | **MultiCam Live** | **v1.0** | [Release multicam-v1.0](https://github.com/1kaiser/binary_live3dscanner/releases/tag/multicam-v1.0) |
 | **Historical Archives** | **v3 – v32** | [All Releases](https://github.com/1kaiser/binary_live3dscanner/releases) |
 

@@ -31,8 +31,9 @@ Crafted with **[Gemini 3.7](https://blog.google/technology/google-deepmind/gemin
 Direct download links for official release binaries on [GitHub Releases](https://github.com/1kaiser/binary_live3dscanner/releases):
 
 * **[MoGe-3D Scanner v2.0 (Latest Release)](https://github.com/1kaiser/binary_live3dscanner/releases/tag/v2.0)**
-  * Direct APK download: [**`MoGe3DScanner_v2.0.apk`**](https://github.com/1kaiser/binary_live3dscanner/releases/download/v2.0/MoGe3DScanner_v2.0.apk) (**456 MB**, self-contained offline build including MoGe-3 INT8 model)
-  * Features MoGe-3 monocular metric depth in meters, 2D thermal-over-frame homography fusion, and triple GLB generation.
+  * **MoGe-3 Metric APK**: [**`MoGe3DScanner_v2.0.apk`**](https://github.com/1kaiser/binary_live3dscanner/releases/download/v2.0/MoGe3DScanner_v2.0.apk) (**456 MB**, self-contained offline build bundling MoGe-3 INT8 model, predicting metric point clouds in true meters, ~1.5 GB RAM).
+  * **MoGe v2 Lightweight APK**: [**`MoGe3DScanner_v2.0_moge2.apk`**](https://github.com/1kaiser/binary_live3dscanner/releases/download/v2.0/MoGe3DScanner_v2.0_moge2.apk) (**132 MB**, lightweight build bundling MoGe v2 FP16, low-RAM footprint of ~200 MB for edge devices).
+  * Features 2D thermal-over-frame homography fusion, triple GLB generation, and Google Filament native 3D rendering.
 * **Historical Releases (`v3` to `v32`)**: All 30 legacy release archives are cataloged with version tags on [GitHub Releases](https://github.com/1kaiser/binary_live3dscanner/releases).
 
 ---
