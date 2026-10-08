@@ -14,6 +14,10 @@ A comprehensive collection of on-device 3D reconstruction, multi-sensor computer
 * 📥 **[Download MoGe3DScanner v2.0 (MoGe-3 Metric, 456 MB)](https://github.com/1kaiser/binary_live3dscanner/releases/download/v2.0/MoGe3DScanner_v2.0.apk)**
 * 📥 **[Download MoGe3DScanner v2.0 (MoGe v2 Lightweight, 132 MB)](https://github.com/1kaiser/binary_live3dscanner/releases/download/v2.0/MoGe3DScanner_v2.0_moge2.apk)**
 
+<p align="center">
+  <img src="assets/moge3_rotating_triple_models.gif" alt="MoGe-3 Multi-Modal Metric 3D Models" width="100%" />
+</p>
+
 ### 2. [MultiCamApp](./MultiCamApp) — Concurrent Multi-Camera & Dual Recording
 * Streams, photographs, and records from multiple camera sensors concurrently (Front, Rear Main, Rear Aux/Depth) using Camera2 APIs.
 * Non-overlapping floating PiP cards and split viewports.

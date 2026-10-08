@@ -38,6 +38,21 @@ Direct download links for official release binaries on [GitHub Releases](https:/
 
 ---
 
+## 🎬 Multi-Modal 3D Model Demonstration
+
+Continuous 360° synchronous turntable inspection showing the three generated 3D models side-by-side (10 FPS slow rotation):
+
+<p align="center">
+  <img src="assets/moge3_rotating_triple_models.gif" alt="MoGe-3 Multi-Modal Metric 3D Models (Optical RGB vs. Fused vs. Radiometric Thermal)" width="100%" />
+</p>
+
+| Column 1: Optical RGB | Column 2: Fused Multi-Modal | Column 3: Radiometric Thermal |
+| :--- | :--- | :--- |
+| **Model:** `moge_scan_<ts>_rgb.glb` | **Model:** `moge_scan_<ts>_fused.glb` | **Model:** `moge_scan_<ts>_thermal.glb` |
+| True-color optical camera RGB texture on metric 3D mesh. | Calibrated Ironbow radiometric heatmap registered over RGB scene context. | Isolated thermal false-color radiometry mapped to metric surface geometry. |
+
+---
+
 ## 🌟 Key Features
 
 1. **On-Device Monocular Metric 3D Geometry (MoGe-3 & MoGe v2)**:
