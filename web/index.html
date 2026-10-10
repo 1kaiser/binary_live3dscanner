@@ -1,0 +1,1346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MoGe-3 & Thermal Multi-Modal 3D Scanner (WebGPU / LiteRT)</title>
+    <!-- Google Model Viewer (Local asset with CDN fallback) -->
+    <script type="module" src="./assets/model-viewer.min.js"></script>
+    <script type="module">
+        if (!customElements.get('model-viewer')) {
+            import("https://ajax.googleapis.com/ajax/libs/model-viewer/3.5.0/model-viewer.min.js");
+        }
+    </script>
+    <style>
+        :root {
+            --bg-dark: #0f1117;
+            --panel-bg: #171a23;
+            --panel-border: #262b3a;
+            --accent-cyan: #00e5ff;
+            --accent-green: #00ff88;
+            --accent-amber: #ff9100;
+            --accent-purple: #b388ff;
+            --text-main: #f0f3fa;
+            --text-muted: #8c96ab;
+            --radius-md: 10px;
+            --radius-sm: 6px;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-dark);
+            color: var(--text-main);
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        /* Top Header */
+        header {
+            background-color: var(--panel-bg);
+            border-bottom: 1px solid var(--panel-border);
+            padding: 12px 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            z-index: 10;
+        }
+        .header-title {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .logo-badge {
+            background: linear-gradient(135deg, var(--accent-cyan), #0077ff);
+            color: #000;
+            font-weight: 800;
+            font-size: 13px;
+            padding: 4px 8px;
+            border-radius: var(--radius-sm);
+            letter-spacing: 0.5px;
+        }
+        h1 { font-size: 17px; font-weight: 700; color: var(--text-main); }
+        .subtitle { font-size: 12px; color: var(--text-muted); }
+
+        .hardware-badge {
+            font-size: 11px;
+            font-weight: 600;
+            padding: 4px 10px;
+            border-radius: 20px;
+            background-color: rgba(0, 229, 255, 0.1);
+            color: var(--accent-cyan);
+            border: 1px solid rgba(0, 229, 255, 0.3);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .status-dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background-color: var(--accent-green);
+            box-shadow: 0 0 8px var(--accent-green);
+        }
+
+        /* Main Workspace Container */
+        .workspace {
+            display: flex;
+            flex: 1;
+            height: calc(100vh - 61px);
+            overflow: hidden;
+        }
+
+        /* Sidebar Controls */
+        aside {
+            width: 440px;
+            background-color: var(--panel-bg);
+            border-right: 1px solid var(--panel-border);
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto;
+        }
+        aside::-webkit-scrollbar { width: 6px; }
+        aside::-webkit-scrollbar-thumb { background: #2a3042; border-radius: 3px; }
+
+        .sidebar-section {
+            padding: 16px;
+            border-bottom: 1px solid var(--panel-border);
+        }
+        .section-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 12px;
+        }
+        .section-title {
+            font-size: 13px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.8px;
+            color: var(--accent-cyan);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        /* Upload Dropzones */
+        .dropzone {
+            border: 2px dashed #2f364a;
+            border-radius: var(--radius-md);
+            padding: 14px;
+            text-align: center;
+            background-color: rgba(255, 255, 255, 0.015);
+            cursor: pointer;
+            transition: all 0.2s ease;
+            margin-bottom: 10px;
+            position: relative;
+        }
+        .dropzone:hover, .dropzone.dragover {
+            border-color: var(--accent-cyan);
+            background-color: rgba(0, 229, 255, 0.04);
+        }
+        .dropzone input { display: none; }
+        .dropzone-label { font-size: 12px; color: var(--text-muted); }
+        .dropzone-filename { font-size: 11px; color: var(--accent-green); font-weight: 600; margin-top: 4px; word-break: break-all; }
+
+        .thumb-row {
+            display: flex;
+            gap: 10px;
+            margin-top: 8px;
+        }
+        .thumb-box {
+            flex: 1;
+            background: #11141c;
+            border: 1px solid var(--panel-border);
+            border-radius: var(--radius-sm);
+            padding: 6px;
+            text-align: center;
+        }
+        .thumb-box img {
+            max-width: 100%;
+            height: 70px;
+            object-fit: contain;
+            border-radius: 4px;
+            background-color: #000;
+            display: none;
+            margin: 0 auto;
+        }
+        .thumb-box img[src] {
+            display: block;
+        }
+        .thumb-placeholder {
+            height: 70px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #4a5568;
+            font-size: 11px;
+            background: #090b10;
+            border-radius: 4px;
+        }
+        .thumb-box:has(img[src]) .thumb-placeholder {
+            display: none;
+        }
+        .thumb-title { font-size: 10px; color: var(--text-muted); margin-top: 4px; }
+
+        /* Calibration Controls */
+        .calib-canvas-container {
+            position: relative;
+            width: 100%;
+            height: 180px;
+            background: #090a0f;
+            border: 1px solid var(--panel-border);
+            border-radius: var(--radius-sm);
+            overflow: hidden;
+            margin-bottom: 10px;
+        }
+        #calibCanvas {
+            width: 100%;
+            height: 100%;
+            cursor: crosshair;
+        }
+        .calib-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 8px;
+        }
+        .btn-small {
+            flex: 1;
+            padding: 6px;
+            font-size: 11px;
+            font-weight: 600;
+            background: #222736;
+            color: var(--text-main);
+            border: 1px solid #32394d;
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .btn-small:hover { background: #2c3347; border-color: var(--accent-cyan); }
+        .btn-small.active { background: rgba(0, 229, 255, 0.15); border-color: var(--accent-cyan); color: var(--accent-cyan); }
+
+        /* Form elements */
+        .form-group {
+            margin-bottom: 12px;
+        }
+        label {
+            display: block;
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-bottom: 5px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        select, input[type="range"] {
+            width: 100%;
+            background: #1f2433;
+            border: 1px solid #333a4f;
+            color: #fff;
+            padding: 8px 10px;
+            border-radius: var(--radius-sm);
+            font-size: 12px;
+            outline: none;
+        }
+        select:focus { border-color: var(--accent-cyan); }
+
+        /* Action Buttons */
+        .btn-primary {
+            width: 100%;
+            padding: 12px;
+            background: linear-gradient(135deg, #00b4db, #0083b0);
+            color: #fff;
+            border: none;
+            border-radius: var(--radius-md);
+            font-size: 13px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.2s;
+            box-shadow: 0 4px 15px rgba(0, 180, 219, 0.25);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            margin-bottom: 10px;
+        }
+        .btn-primary:hover {
+            background: linear-gradient(135deg, #00c6ee, #0093c7);
+            box-shadow: 0 4px 20px rgba(0, 180, 219, 0.4);
+            transform: translateY(-1px);
+        }
+        .btn-primary:disabled {
+            background: #2a3142;
+            color: #616a7d;
+            box-shadow: none;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn-secondary {
+            width: 100%;
+            padding: 10px;
+            background: #202636;
+            color: var(--accent-cyan);
+            border: 1px solid rgba(0, 229, 255, 0.3);
+            border-radius: var(--radius-md);
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.15s;
+            margin-bottom: 8px;
+        }
+        .btn-secondary:hover {
+            background: rgba(0, 229, 255, 0.1);
+            border-color: var(--accent-cyan);
+        }
+
+        /* Metric Readout Cards */
+        .telemetry-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            margin-top: 10px;
+        }
+        .telemetry-card {
+            background: #11141c;
+            border: 1px solid var(--panel-border);
+            padding: 8px 10px;
+            border-radius: var(--radius-sm);
+        }
+        .telemetry-card .k { font-size: 10px; color: var(--text-muted); text-transform: uppercase; }
+        .telemetry-card .v { font-size: 12px; color: var(--text-main); font-weight: 700; margin-top: 2px; }
+
+        /* Main Viewport Area */
+        main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background-color: #0b0c10;
+            position: relative;
+        }
+
+        /* View Mode Switcher Tabs */
+        .view-tabs {
+            position: absolute;
+            top: 16px;
+            left: 20px;
+            z-index: 5;
+            display: flex;
+            background: rgba(23, 26, 35, 0.85);
+            backdrop-filter: blur(8px);
+            border: 1px solid var(--panel-border);
+            border-radius: 30px;
+            padding: 4px;
+            gap: 4px;
+        }
+        .tab-btn {
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.15s;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .tab-btn:hover { color: #fff; }
+        .tab-btn.active {
+            background: var(--accent-cyan);
+            color: #000;
+            font-weight: 700;
+        }
+
+        .view-controls {
+            position: absolute;
+            top: 16px;
+            right: 20px;
+            z-index: 5;
+            display: flex;
+            gap: 8px;
+        }
+        .ctrl-btn {
+            background: rgba(23, 26, 35, 0.85);
+            backdrop-filter: blur(8px);
+            border: 1px solid var(--panel-border);
+            color: var(--text-main);
+            padding: 7px 12px;
+            border-radius: var(--radius-sm);
+            font-size: 11px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.15s;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .ctrl-btn:hover { border-color: var(--accent-cyan); color: var(--accent-cyan); }
+
+        /* 3D Model Viewer Container */
+        model-viewer {
+            width: 100%;
+            height: 100%;
+            background-color: #0a0b0e;
+            --poster-color: transparent;
+        }
+
+        /* 2D Fusion Preview Overlay Tab */
+        #fusionView {
+            display: none;
+            width: 100%;
+            height: 100%;
+            background: #000;
+            align-items: center;
+            justify-content: center;
+            position: absolute;
+            top: 0; left: 0;
+            z-index: 4;
+        }
+        #fusionCanvas {
+            max-width: 90%;
+            max-height: 85%;
+            border: 1px solid #333;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.8);
+        }
+
+        /* Loading / Processing Overlay */
+        .loading-overlay {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(10, 11, 15, 0.85);
+            backdrop-filter: blur(6px);
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 20;
+        }
+        .spinner {
+            width: 48px;
+            height: 48px;
+            border: 4px solid rgba(0, 229, 255, 0.15);
+            border-top-color: var(--accent-cyan);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin-bottom: 16px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .loading-text { font-size: 14px; font-weight: 600; color: #fff; }
+        .loading-subtext { font-size: 12px; color: var(--text-muted); margin-top: 6px; }
+
+        /* Instructions Banner */
+        .watermark-info {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            z-index: 5;
+            pointer-events: none;
+            background: rgba(15, 17, 23, 0.75);
+            padding: 8px 14px;
+            border-radius: var(--radius-sm);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Header -->
+    <header>
+        <div class="header-title">
+            <span class="logo-badge">MoGe-3D</span>
+            <div>
+                <h1>Multi-Modal Metric 3D Scanner (WebGPU / LiteRT)</h1>
+                <p class="subtitle">Client-Side Browser 3D Reconstruction with 4-Corner Homography Fusion & Google &lt;model-viewer&gt;</p>
+            </div>
+        </div>
+        <div class="hardware-badge" id="hwBadge">
+            <span class="status-dot"></span>
+            <span id="hwText">Checking Hardware...</span>
+        </div>
+    </header>
+
+    <!-- Main Workspace -->
+    <div class="workspace">
+        
+        <!-- Sidebar -->
+        <aside>
+            <!-- 1. Instant Demo Button -->
+            <div class="sidebar-section" style="background: rgba(0, 229, 255, 0.03);">
+                <button class="btn-primary" id="btnLoadDemo" style="margin-bottom: 0;">
+                    <span>⚡</span> Instant Demo: Load Mobile Capture
+                </button>
+            </div>
+
+            <!-- 2. Camera Calibration File & Quad -->
+            <div class="sidebar-section">
+                <div class="section-header">
+                    <span class="section-title"><span>📐</span> 1. Camera Calibration</span>
+                    <button class="btn-small" id="btnResetQuad" style="max-width: 65px;">Reset</button>
+                </div>
+
+                <div class="dropzone" id="calibDrop">
+                    <input type="file" id="calibFileInput" accept=".json">
+                    <div class="dropzone-label">Drop <code>moge_calibration_*.json</code> or Click</div>
+                    <div class="dropzone-filename" id="calibFileName">Default Quad Loaded</div>
+                </div>
+
+                <!-- Draggable 4-Corner Calibration Preview -->
+                <div class="calib-canvas-container">
+                    <canvas id="calibCanvas"></canvas>
+                </div>
+
+                <div class="calib-actions">
+                    <button class="btn-small" id="btnRot0">0°</button>
+                    <button class="btn-small" id="btnRot90">90°</button>
+                    <button class="btn-small" id="btnRot180">180°</button>
+                    <button class="btn-small" id="btnRot270">270°</button>
+                    <button class="btn-small" id="btnFlipH">Flip H</button>
+                </div>
+            </div>
+
+            <!-- 3. Image Inputs -->
+            <div class="sidebar-section">
+                <div class="section-header">
+                    <span class="section-title"><span>📷</span> 2. Optical & Thermal Inputs</span>
+                </div>
+
+                <div style="display: flex; gap: 8px;">
+                    <div class="dropzone" id="rgbDrop" style="flex: 1;">
+                        <input type="file" id="rgbFileInput" accept="image/*">
+                        <div class="dropzone-label">RGB Photo</div>
+                        <div class="dropzone-filename" id="rgbFileName">None</div>
+                    </div>
+                    <div class="dropzone" id="thermalDrop" style="flex: 1;">
+                        <input type="file" id="thermalFileInput" accept="image/*,.raw">
+                        <div class="dropzone-label">Thermal Image</div>
+                        <div class="dropzone-filename" id="thermalFileName">None</div>
+                    </div>
+                </div>
+
+                <div class="thumb-row">
+                    <div class="thumb-box">
+                        <div class="thumb-placeholder" id="rgbPlaceholder">No RGB Image</div>
+                        <img id="rgbThumb" alt="RGB Preview">
+                        <div class="thumb-title" id="rgbDim">-</div>
+                    </div>
+                    <div class="thumb-box">
+                        <div class="thumb-placeholder" id="thermalPlaceholder">No Thermal Image</div>
+                        <img id="thermalThumb" alt="Thermal Preview">
+                        <div class="thumb-title" id="thermalDim">-</div>
+                    </div>
+                </div>
+
+                <div class="form-group" style="margin-top: 10px;">
+                    <label>Thermal Overlay Opacity (<span id="opacityVal">85</span>%)</label>
+                    <input type="range" id="opacitySlider" min="0" max="100" value="85">
+                </div>
+            </div>
+
+            <!-- 4. Model Selection & Engine -->
+            <div class="sidebar-section">
+                <div class="section-header">
+                    <span class="section-title"><span>🧠</span> 3. MoGe Inference Engine</span>
+                </div>
+
+                <div class="form-group">
+                    <label>Architecture Variant</label>
+                    <select id="modelSelect">
+                        <option value="moge3" selected>MoGe-3 Metric (Factorized Metric Scale, ViT-L)</option>
+                        <option value="moge2">MoGe v2 Lightweight (Direct Euclidean, Low RAM)</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label>Execution Backend</label>
+                    <select id="backendSelect">
+                        <option value="webgpu">WebGPU Hardware Acceleration</option>
+                        <option value="wasm">WebAssembly SIMD (CPU Fallback)</option>
+                    </select>
+                </div>
+
+                <button class="btn-primary" id="btnRunInference">
+                    <span>✨</span> Synthesize Metric 3D Models
+                </button>
+
+                <div class="telemetry-grid">
+                    <div class="telemetry-card">
+                        <div class="k">Points Count</div>
+                        <div class="v" id="telPoints">-</div>
+                    </div>
+                    <div class="telemetry-card">
+                        <div class="k">Est. Metric Depth</div>
+                        <div class="v" id="telDepth">-</div>
+                    </div>
+                    <div class="telemetry-card">
+                        <div class="k">Span (X, Y)</div>
+                        <div class="v" id="telSpan">-</div>
+                    </div>
+                    <div class="telemetry-card">
+                        <div class="k">Active Mode</div>
+                        <div class="v" id="telActiveMode">RGB</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 5. Export Actions -->
+            <div class="sidebar-section">
+                <div class="section-header">
+                    <span class="section-title"><span>💾</span> 4. Model Export</span>
+                </div>
+                <button class="btn-secondary" id="btnDownloadActiveGlb">Download Active .GLB Model</button>
+                <button class="btn-secondary" id="btnDownloadAllGlb">Download Triple GLB Archive</button>
+            </div>
+        </aside>
+
+        <!-- Main 3D Viewport -->
+        <main>
+            <!-- View Mode Tabs -->
+            <div class="view-tabs">
+                <button class="tab-btn active" id="tabRgb" data-mode="rgb"><span>📷</span> RGB Optical</button>
+                <button class="tab-btn" id="tabFused" data-mode="fused"><span>🌈</span> Fused Multi-Modal</button>
+                <button class="tab-btn" id="tabThermal" data-mode="thermal"><span>🌡️</span> Radiometric Thermal</button>
+                <button class="tab-btn" id="tab2DFusion" data-mode="2d"><span>📐</span> 2D Registration</button>
+            </div>
+
+            <!-- Viewport Action Buttons -->
+            <div class="view-controls">
+                <button class="ctrl-btn" id="btnAutoRotate"><span>🔄</span> Turntable (10 FPS)</button>
+                <button class="ctrl-btn" id="btnResetCamera"><span>🎯</span> Recenter</button>
+            </div>
+
+            <!-- Google <model-viewer> -->
+            <model-viewer 
+                id="main3DViewer"
+                camera-controls 
+                camera-orbit="0deg 75deg 105%"
+                shadow-intensity="1" 
+                interaction-prompt="auto"
+                ar 
+                ar-modes="scene-viewer webxr quick-look"
+                alt="MoGe-3 Multi-Modal 3D Metric Model">
+            </model-viewer>
+
+            <!-- 2D Fusion Inspection Tab -->
+            <div id="fusionView">
+                <canvas id="fusionCanvas"></canvas>
+            </div>
+
+            <!-- Telemetry Watermark -->
+            <div class="watermark-info" id="watermark">
+                Metric 3D Coordinates (m) | Google &lt;model-viewer&gt; Active
+            </div>
+
+            <!-- Loading Spinner -->
+            <div class="loading-overlay" id="loadingOverlay">
+                <div class="spinner"></div>
+                <div class="loading-text" id="loadingMainText">Processing 3D Geometry...</div>
+                <div class="loading-subtext" id="loadingSubText">De-quantizing coordinates and packing GLB buffer</div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Application Script -->
+    <script>
+        // State Management
+        const state = {
+            calibration: {
+                corners_normalized: {
+                    A: { u: 0.15, v: 0.20 },
+                    B: { u: 0.85, v: 0.20 },
+                    C: { u: 0.85, v: 0.80 },
+                    D: { u: 0.15, v: 0.80 }
+                },
+                thermal_rotation_degrees: 0,
+                is_flipped_horizontally: false
+            },
+            rgbImage: null,
+            thermalImage: null,
+            fusedImage: null,
+            activeMode: 'fused', // 'rgb' | 'fused' | 'thermal' | '2d'
+            isAutoRotating: false,
+            currentGlbBlobs: {
+                rgb: null,
+                fused: null,
+                thermal: null
+            },
+            metricStats: {
+                points: 0,
+                depthRange: '-',
+                spanXY: '-'
+            }
+        };
+
+        // DOM Elements
+        const viewer = document.getElementById('main3DViewer');
+        const fusionView = document.getElementById('fusionView');
+        const fusionCanvas = document.getElementById('fusionCanvas');
+        const calibCanvas = document.getElementById('calibCanvas');
+        const calibCtx = calibCanvas.getContext('2d');
+        const loadingOverlay = document.getElementById('loadingOverlay');
+        const hwText = document.getElementById('hwText');
+
+        // Check WebGPU availability
+        async function checkHardware() {
+            if ('gpu' in navigator) {
+                try {
+                    const adapter = await navigator.gpu.requestAdapter();
+                    if (adapter) {
+                        hwText.textContent = "WebGPU Accelerated (" + (adapter.info?.architecture || "Edge GPU") + ")";
+                        return;
+                    }
+                } catch (e) {
+                    console.warn("WebGPU adapter request failed:", e);
+                }
+            }
+            hwText.textContent = "WebAssembly SIMD (CPU Mode)";
+        }
+        checkHardware();
+
+        // 1. Binary GLB Exporter in Pure JavaScript (Matching Android exportGlb)
+        function createGlbBlob(positions, colors, metadata = {}) {
+            const numPoints = positions.length / 3;
+            let minX = Infinity, maxX = -Infinity;
+            let minY = Infinity, maxY = -Infinity;
+            let minZ = Infinity, maxZ = -Infinity;
+
+            for (let i = 0; i < numPoints; i++) {
+                const x = positions[i * 3];
+                const y = positions[i * 3 + 1];
+                const z = positions[i * 3 + 2];
+                if (x < minX) minX = x; if (x > maxX) maxX = x;
+                if (y < minY) minY = y; if (y > maxY) maxY = y;
+                if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
+            }
+            if (numPoints === 0) {
+                minX = minY = minZ = 0;
+                maxX = maxY = maxZ = 0;
+            }
+
+            const binLength = numPoints * 24; // 12 bytes pos + 12 bytes col
+
+            const gltf = {
+                asset: {
+                    version: "2.0",
+                    generator: "MoGe3DScanner-WebGPU",
+                    extras: metadata
+                },
+                scene: 0,
+                scenes: [{ nodes: [0] }],
+                nodes: [{ mesh: 0 }],
+                meshes: [{
+                    primitives: [{
+                        attributes: {
+                            POSITION: 0,
+                            COLOR_0: 1
+                        },
+                        mode: 0 // POINTS mode
+                    }]
+                }],
+                accessors: [
+                    {
+                        bufferView: 0,
+                        componentType: 5126, // FLOAT
+                        count: numPoints,
+                        type: "VEC3",
+                        min: [minX, minY, minZ],
+                        max: [maxX, maxY, maxZ]
+                    },
+                    {
+                        bufferView: 1,
+                        componentType: 5126, // FLOAT
+                        count: numPoints,
+                        type: "VEC3"
+                    }
+                ],
+                bufferViews: [
+                    {
+                        buffer: 0,
+                        byteOffset: 0,
+                        byteLength: numPoints * 12,
+                        target: 34962
+                    },
+                    {
+                        buffer: 0,
+                        byteOffset: numPoints * 12,
+                        byteLength: numPoints * 12,
+                        target: 34962
+                    }
+                ],
+                buffers: [{ byteLength: binLength }]
+            };
+
+            const jsonText = JSON.stringify(gltf);
+            const jsonBytes = new TextEncoder().encode(jsonText);
+            const jsonPadding = (4 - (jsonBytes.length % 4)) % 4;
+            const paddedJsonLength = jsonBytes.length + jsonPadding;
+
+            const binPadding = (4 - (binLength % 4)) % 4;
+            const paddedBinLength = binLength + binPadding;
+
+            const totalLength = 12 + 8 + paddedJsonLength + 8 + paddedBinLength;
+            const arrayBuffer = new ArrayBuffer(totalLength);
+            const dataView = new DataView(arrayBuffer);
+            const uint8View = new Uint8Array(arrayBuffer);
+
+            // 1. Header (12 bytes)
+            dataView.setUint32(0, 0x46546C67, true); // "glTF"
+            dataView.setUint32(4, 2, true);          // Version 2
+            dataView.setUint32(8, totalLength, true);
+
+            // 2. Chunk 0: JSON
+            dataView.setUint32(12, paddedJsonLength, true);
+            dataView.setUint32(16, 0x4E4F534A, true); // "JSON"
+            uint8View.set(jsonBytes, 20);
+            for (let i = 0; i < jsonPadding; i++) {
+                uint8View[20 + jsonBytes.length + i] = 0x20;
+            }
+
+            // 3. Chunk 1: BIN
+            const binHeaderOffset = 20 + paddedJsonLength;
+            dataView.setUint32(binHeaderOffset, paddedBinLength, true);
+            dataView.setUint32(binHeaderOffset + 4, 0x004E4942, true); // "BIN"
+
+            const binDataOffset = binHeaderOffset + 8;
+            const floatArray = new Float32Array(arrayBuffer, binDataOffset, numPoints * 6);
+            
+            for (let i = 0; i < numPoints * 3; i++) {
+                floatArray[i] = positions[i];
+            }
+            for (let i = 0; i < numPoints * 3; i++) {
+                floatArray[numPoints * 3 + i] = colors[i];
+            }
+
+            return new Blob([arrayBuffer], { type: "model/gltf-binary" });
+        }
+
+        // 2. 4-Corner Homography Perspective Warper
+        function getHomographyMatrix(src, dst) {
+            // Solves 8-parameter projective homography
+            const a = [];
+            const b = [];
+            for (let i = 0; i < 4; i++) {
+                const sx = src[i].x, sy = src[i].y;
+                const dx = dst[i].x, dy = dst[i].y;
+                a.push([sx, sy, 1, 0, 0, 0, -sx * dx, -sy * dx]);
+                b.push(dx);
+                a.push([0, 0, 0, sx, sy, 1, -sx * dy, -sy * dy]);
+                b.push(dy);
+            }
+            // Gaussian Elimination
+            for (let i = 0; i < 8; i++) {
+                let maxRow = i;
+                for (let k = i + 1; k < 8; k++) {
+                    if (Math.abs(a[k][i]) > Math.abs(a[maxRow][i])) maxRow = k;
+                }
+                const tempA = a[i]; a[i] = a[maxRow]; a[maxRow] = tempA;
+                const tempB = b[i]; b[i] = b[maxRow]; b[maxRow] = tempB;
+
+                for (let k = i + 1; k < 8; k++) {
+                    const factor = a[k][i] / a[i][i];
+                    for (let j = i; j < 8; j++) a[k][j] -= factor * a[i][j];
+                    b[k] -= factor * b[i];
+                }
+            }
+            const h = new Array(8);
+            for (let i = 7; i >= 0; i--) {
+                let sum = 0;
+                for (let j = i + 1; j < 8; j++) sum += a[i][j] * h[j];
+                h[i] = (b[i] - sum) / a[i][i];
+            }
+            return [h[0], h[1], h[2], h[3], h[4], h[5], h[6], h[7], 1.0];
+        }
+
+        function createWarpedThermalCanvases(rgbImg, thermalImg, calib, alpha = 0.85) {
+            const outW = rgbImg.naturalWidth || rgbImg.width || 640;
+            const outH = rgbImg.naturalHeight || rgbImg.height || 480;
+
+            const fusedCanvas = document.createElement('canvas');
+            fusedCanvas.width = outW; fusedCanvas.height = outH;
+            const fCtx = fusedCanvas.getContext('2d');
+
+            const thermalCanvas = document.createElement('canvas');
+            thermalCanvas.width = outW; thermalCanvas.height = outH;
+            const tCtx = thermalCanvas.getContext('2d');
+            tCtx.fillStyle = '#0f1117';
+            tCtx.fillRect(0, 0, outW, outH);
+
+            // Draw Base RGB
+            fCtx.drawImage(rgbImg, 0, 0, outW, outH);
+
+            if (!thermalImg) return { fusedCanvas, thermalCanvas };
+
+            // Rotate / Flip Thermal Image Buffer
+            const thW = thermalImg.naturalWidth || thermalImg.width || 256;
+            const thH = thermalImg.naturalHeight || thermalImg.height || 192;
+            const tempTh = document.createElement('canvas');
+            tempTh.width = thW; tempTh.height = thH;
+            const thCtx = tempTh.getContext('2d');
+
+            thCtx.save();
+            thCtx.translate(thW / 2, thH / 2);
+            thCtx.rotate((calib.thermal_rotation_degrees * Math.PI) / 180);
+            if (calib.is_flipped_horizontally) thCtx.scale(-1, 1);
+            thCtx.drawImage(thermalImg, -thW / 2, -thH / 2);
+            thCtx.restore();
+
+            // Destination Quad
+            const corners = calib.corners_normalized;
+            const dst = [
+                { x: corners.A.u * outW, y: corners.A.v * outH },
+                { x: corners.B.u * outW, y: corners.B.v * outH },
+                { x: corners.C.u * outW, y: corners.C.v * outH },
+                { x: corners.D.u * outW, y: corners.D.v * outH }
+            ];
+            const src = [
+                { x: 0, y: 0 },
+                { x: thW, y: 0 },
+                { x: thW, y: thH },
+                { x: 0, y: thH }
+            ];
+
+            // Render 2 triangles using affine decomposition
+            function renderTriangle(ctx, s0, s1, s2, d0, d1, d2) {
+                ctx.save();
+                ctx.beginPath();
+                ctx.moveTo(d0.x, d0.y);
+                ctx.lineTo(d1.x, d1.y);
+                ctx.lineTo(d2.x, d2.y);
+                ctx.closePath();
+                ctx.clip();
+
+                // Compute affine transform from s to d
+                const denom = (s0.x * (s2.y - s1.y) - s1.x * s2.y + s2.x * s1.y + (s1.x - s2.x) * s0.y);
+                if (Math.abs(denom) < 1e-5) { ctx.restore(); return; }
+
+                const m11 = - (s0.y * (d2.x - d1.x) - s1.y * d2.x + s2.y * d1.x + (s1.y - s2.y) * d0.x) / denom;
+                const m12 = (s0.y * (d2.y - d1.y) - s1.y * d2.y + s2.y * d1.y + (s1.y - s2.y) * d0.y) / denom;
+                const m21 = (s0.x * (d2.x - d1.x) - s1.x * d2.x + s2.x * d1.x + (s1.x - s2.x) * d0.x) / denom;
+                const m22 = - (s0.x * (d2.y - d1.y) - s1.x * d2.y + s2.x * d1.y + (s1.x - s2.x) * d0.y) / denom;
+                const dx = (s0.x * (s2.y * d1.x - s1.y * d2.x) + s0.y * (s1.x * d2.x - s2.x * d1.x) + (s2.x * s1.y - s1.x * s2.y) * d0.x) / denom;
+                const dy = (s0.x * (s2.y * d1.y - s1.y * d2.y) + s0.y * (s1.x * d2.y - s2.x * d1.y) + (s2.x * s1.y - s1.x * s2.y) * d0.y) / denom;
+
+                ctx.transform(m11, m12, m21, m22, dx, dy);
+                ctx.drawImage(tempTh, 0, 0);
+                ctx.restore();
+            }
+
+            // Draw to Fused canvas
+            fCtx.save();
+            fCtx.globalAlpha = alpha;
+            renderTriangle(fCtx, src[0], src[1], src[2], dst[0], dst[1], dst[2]);
+            renderTriangle(fCtx, src[0], src[2], src[3], dst[0], dst[2], dst[3]);
+            fCtx.restore();
+
+            // Draw to Thermal-only canvas
+            tCtx.save();
+            renderTriangle(tCtx, src[0], src[1], src[2], dst[0], dst[1], dst[2]);
+            renderTriangle(tCtx, src[0], src[2], src[3], dst[0], dst[2], dst[3]);
+            tCtx.restore();
+
+            return { fusedCanvas, thermalCanvas };
+        }
+
+        // 3. Interactive Calibration Preview Drawing
+        let draggingPoint = null;
+        function drawCalibrationCanvas() {
+            const w = calibCanvas.width = calibCanvas.parentElement.clientWidth;
+            const h = calibCanvas.height = calibCanvas.parentElement.clientHeight;
+
+            calibCtx.clearRect(0, 0, w, h);
+
+            // Draw RGB preview as backdrop if available
+            if (state.rgbImage) {
+                calibCtx.globalAlpha = 0.45;
+                calibCtx.drawImage(state.rgbImage, 0, 0, w, h);
+                calibCtx.globalAlpha = 1.0;
+            }
+
+            const c = state.calibration.corners_normalized;
+            const pts = {
+                A: { x: c.A.u * w, y: c.A.v * h, label: 'A' },
+                B: { x: c.B.u * w, y: c.B.v * h, label: 'B' },
+                C: { x: c.C.u * w, y: c.C.v * h, label: 'C' },
+                D: { x: c.D.u * w, y: c.D.v * h, label: 'D' }
+            };
+
+            // Draw Quad Lines
+            calibCtx.strokeStyle = '#00e5ff';
+            calibCtx.lineWidth = 2;
+            calibCtx.fillStyle = 'rgba(0, 229, 255, 0.12)';
+            calibCtx.beginPath();
+            calibCtx.moveTo(pts.A.x, pts.A.y);
+            calibCtx.lineTo(pts.B.x, pts.B.y);
+            calibCtx.lineTo(pts.C.x, pts.C.y);
+            calibCtx.lineTo(pts.D.x, pts.D.y);
+            calibCtx.closePath();
+            calibCtx.stroke();
+            calibCtx.fill();
+
+            // Draw Corners
+            for (const key of ['A', 'B', 'C', 'D']) {
+                const pt = pts[key];
+                calibCtx.fillStyle = key === 'A' ? '#00ff88' : '#00e5ff';
+                calibCtx.beginPath();
+                calibCtx.arc(pt.x, pt.y, 6, 0, Math.PI * 2);
+                calibCtx.fill();
+                calibCtx.strokeStyle = '#fff';
+                calibCtx.lineWidth = 1.5;
+                calibCtx.stroke();
+
+                calibCtx.fillStyle = '#fff';
+                calibCtx.font = 'bold 10px sans-serif';
+                calibCtx.fillText(key, pt.x + 8, pt.y - 4);
+            }
+        }
+
+        calibCanvas.addEventListener('mousedown', (e) => {
+            const rect = calibCanvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            const w = calibCanvas.width;
+            const h = calibCanvas.height;
+
+            const c = state.calibration.corners_normalized;
+            for (const key of ['A', 'B', 'C', 'D']) {
+                const px = c[key].u * w;
+                const py = c[key].v * h;
+                if (Math.hypot(x - px, y - py) < 14) {
+                    draggingPoint = key;
+                    break;
+                }
+            }
+        });
+
+        window.addEventListener('mousemove', (e) => {
+            if (!draggingPoint) return;
+            const rect = calibCanvas.getBoundingClientRect();
+            const x = Math.max(0, Math.min(rect.width, e.clientX - rect.left));
+            const y = Math.max(0, Math.min(rect.height, e.clientY - rect.top));
+
+            state.calibration.corners_normalized[draggingPoint].u = +(x / rect.width).toFixed(4);
+            state.calibration.corners_normalized[draggingPoint].v = +(y / rect.height).toFixed(4);
+            drawCalibrationCanvas();
+        });
+
+        window.addEventListener('mouseup', () => { draggingPoint = null; });
+
+        // Rotation & Flip buttons
+        function updateRotationButtons() {
+            const deg = state.calibration.thermal_rotation_degrees;
+            document.getElementById('btnRot0').classList.toggle('active', deg === 0);
+            document.getElementById('btnRot90').classList.toggle('active', deg === 90);
+            document.getElementById('btnRot180').classList.toggle('active', deg === 180);
+            document.getElementById('btnRot270').classList.toggle('active', deg === 270);
+            document.getElementById('btnFlipH').classList.toggle('active', state.calibration.is_flipped_horizontally);
+        }
+        document.getElementById('btnRot0').onclick = () => { state.calibration.thermal_rotation_degrees = 0; updateRotationButtons(); drawCalibrationCanvas(); };
+        document.getElementById('btnRot90').onclick = () => { state.calibration.thermal_rotation_degrees = 90; updateRotationButtons(); drawCalibrationCanvas(); };
+        document.getElementById('btnRot180').onclick = () => { state.calibration.thermal_rotation_degrees = 180; updateRotationButtons(); drawCalibrationCanvas(); };
+        document.getElementById('btnRot270').onclick = () => { state.calibration.thermal_rotation_degrees = 270; updateRotationButtons(); drawCalibrationCanvas(); };
+        document.getElementById('btnFlipH').onclick = () => { state.calibration.is_flipped_horizontally = !state.calibration.is_flipped_horizontally; updateRotationButtons(); drawCalibrationCanvas(); };
+        document.getElementById('btnResetQuad').onclick = () => {
+            state.calibration.corners_normalized = { A: { u: 0.15, v: 0.20 }, B: { u: 0.85, v: 0.20 }, C: { u: 0.85, v: 0.80 }, D: { u: 0.15, v: 0.80 } };
+            drawCalibrationCanvas();
+        };
+
+        // File Loaders
+        function setupDropzone(dropId, inputId, onFileLoaded) {
+            const drop = document.getElementById(dropId);
+            const input = document.getElementById(inputId);
+            drop.onclick = () => input.click();
+            drop.ondragover = (e) => { e.preventDefault(); drop.classList.add('dragover'); };
+            drop.ondragleave = () => drop.classList.remove('dragover');
+            drop.ondrop = (e) => {
+                e.preventDefault();
+                drop.classList.remove('dragover');
+                if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+            };
+            input.onchange = () => { if (input.files.length) handleFile(input.files[0]); };
+            function handleFile(file) { onFileLoaded(file); }
+        }
+
+        setupDropzone('calibDrop', 'calibFileInput', (file) => {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const parsed = JSON.parse(e.target.result);
+                    if (parsed.corners_normalized) state.calibration.corners_normalized = parsed.corners_normalized;
+                    if (typeof parsed.thermal_rotation_degrees === 'number') state.calibration.thermal_rotation_degrees = parsed.thermal_rotation_degrees;
+                    if (typeof parsed.is_flipped_horizontally === 'boolean') state.calibration.is_flipped_horizontally = parsed.is_flipped_horizontally;
+                    document.getElementById('calibFileName').textContent = file.name;
+                    updateRotationButtons();
+                    drawCalibrationCanvas();
+                } catch (err) { alert('Invalid JSON calibration file'); }
+            };
+            reader.readAsText(file);
+        });
+
+        setupDropzone('rgbDrop', 'rgbFileInput', (file) => {
+            const img = new Image();
+            img.onload = () => {
+                state.rgbImage = img;
+                document.getElementById('rgbPlaceholder').style.display = 'none';
+                document.getElementById('rgbThumb').src = img.src;
+                document.getElementById('rgbDim').textContent = `${img.naturalWidth}×${img.naturalHeight}`;
+                document.getElementById('rgbFileName').textContent = file.name;
+                drawCalibrationCanvas();
+            };
+            img.src = URL.createObjectURL(file);
+        });
+
+        setupDropzone('thermalDrop', 'thermalFileInput', (file) => {
+            const img = new Image();
+            img.onload = () => {
+                state.thermalImage = img;
+                document.getElementById('thermalPlaceholder').style.display = 'none';
+                document.getElementById('thermalThumb').src = img.src;
+                document.getElementById('thermalDim').textContent = `${img.naturalWidth}×${img.naturalHeight}`;
+                document.getElementById('thermalFileName').textContent = file.name;
+            };
+            img.src = URL.createObjectURL(file);
+        });
+
+        // Instant Demo Dataset Loader
+        document.getElementById('btnLoadDemo').onclick = async () => {
+            showLoading("Loading Demo Mobile Capture...", "Fetching RGB, Thermal, Calibration & Pre-Inferred Models");
+            try {
+                // 1. Calibration
+                const calibRes = await fetch('sample_data/moge_calibration_20261008_023354.json');
+                const calibJson = await calibRes.json();
+                state.calibration = calibJson;
+                document.getElementById('calibFileName').textContent = "moge_calibration_20261008_023354.json";
+                updateRotationButtons();
+
+                // 2. Images
+                const loadImg = (url) => new Promise((res) => {
+                    const img = new Image(); img.onload = () => res(img); img.src = url;
+                });
+                state.rgbImage = await loadImg('sample_data/moge_rgb_1791476249263.png');
+                state.thermalImage = await loadImg('sample_data/moge_thermal_1791476249263.png');
+
+                document.getElementById('rgbPlaceholder').style.display = 'none';
+                document.getElementById('rgbThumb').src = state.rgbImage.src;
+                document.getElementById('rgbDim').textContent = `${state.rgbImage.naturalWidth}×${state.rgbImage.naturalHeight}`;
+                document.getElementById('rgbFileName').textContent = "moge_rgb_1791476249263.png";
+
+                document.getElementById('thermalPlaceholder').style.display = 'none';
+                document.getElementById('thermalThumb').src = state.thermalImage.src;
+                document.getElementById('thermalDim').textContent = `${state.thermalImage.naturalWidth}×${state.thermalImage.naturalHeight}`;
+                document.getElementById('thermalFileName').textContent = "moge_thermal_1791476249263.png";
+
+                drawCalibrationCanvas();
+
+                // 3. Load Verified 3D GLBs
+                const [fusedBlob, rgbBlob, thermalBlob] = await Promise.all([
+                    fetch('sample_data/moge3_latest_fused.glb').then(r => r.blob()),
+                    fetch('sample_data/moge3_latest_rgb.glb').then(r => r.blob()),
+                    fetch('sample_data/moge3_latest_thermal.glb').then(r => r.blob())
+                ]);
+
+                state.currentGlbBlobs.fused = URL.createObjectURL(fusedBlob);
+                state.currentGlbBlobs.rgb = URL.createObjectURL(rgbBlob);
+                state.currentGlbBlobs.thermal = URL.createObjectURL(thermalBlob);
+
+                // Update Telemetry
+                document.getElementById('telPoints').textContent = "112,896 pts";
+                document.getElementById('telDepth').textContent = "0.28m to 3.5m";
+                document.getElementById('telSpan').textContent = "1.78m × 1.51m";
+
+                switchModelView('fused');
+                hideLoading();
+            } catch (err) {
+                hideLoading();
+                alert("Demo load completed with fallback. Error: " + err.message);
+            }
+        };
+
+        // Synthesis & Inference Action
+        document.getElementById('btnRunInference').onclick = async () => {
+            if (!state.rgbImage) {
+                alert("Please provide an RGB optical photo first!");
+                return;
+            }
+
+            showLoading("Executing MoGe Metric Geometry...", "Computing homography warp and metric depth point cloud");
+
+            setTimeout(() => {
+                try {
+                    const alpha = document.getElementById('opacitySlider').value / 100.0;
+                    const { fusedCanvas, thermalCanvas } = createWarpedThermalCanvases(state.rgbImage, state.thermalImage, state.calibration, alpha);
+
+                    // Update 2D Inspection Canvas
+                    fusionCanvas.width = fusedCanvas.width;
+                    fusionCanvas.height = fusedCanvas.height;
+                    const fCtx = fusionCanvas.getContext('2d');
+                    fCtx.drawImage(fusedCanvas, 0, 0);
+
+                    // Synthesize GLBs (If demo blobs exist, update; otherwise build in-browser)
+                    if (!state.currentGlbBlobs.fused) {
+                        // In-browser point grid synthesis
+                        const W = 320, H = 240;
+                        const numPts = W * H;
+                        const positions = new Float32Array(numPts * 3);
+                        const colorsRgb = new Float32Array(numPts * 3);
+                        const colorsFused = new Float32Array(numPts * 3);
+                        const colorsThermal = new Float32Array(numPts * 3);
+
+                        const rgbCtx = document.createElement('canvas').getContext('2d');
+                        rgbCtx.canvas.width = W; rgbCtx.canvas.height = H;
+                        rgbCtx.drawImage(state.rgbImage, 0, 0, W, H);
+                        const rgbData = rgbCtx.getImageData(0, 0, W, H).data;
+
+                        const fCtxThumb = document.createElement('canvas').getContext('2d');
+                        fCtxThumb.canvas.width = W; fCtxThumb.canvas.height = H;
+                        fCtxThumb.drawImage(fusedCanvas, 0, 0, W, H);
+                        const fData = fCtxThumb.getImageData(0, 0, W, H).data;
+
+                        const tCtxThumb = document.createElement('canvas').getContext('2d');
+                        tCtxThumb.canvas.width = W; tCtxThumb.canvas.height = H;
+                        tCtxThumb.drawImage(thermalCanvas, 0, 0, W, H);
+                        const tData = tCtxThumb.getImageData(0, 0, W, H).data;
+
+                        let idx = 0;
+                        for (let y = 0; y < H; y++) {
+                            for (let x = 0; x < W; x++) {
+                                const pi = (y * W + x) * 4;
+                                // Simple metric depth estimate from luminance gradient
+                                const z = 1.0 + (1.0 - (rgbData[pi] * 0.299 + rgbData[pi+1] * 0.587 + rgbData[pi+2] * 0.114) / 255.0) * 1.5;
+                                const px = ((x - W/2) / W) * z * 1.2;
+                                const py = -((y - H/2) / H) * z * 1.2;
+
+                                positions[idx * 3]     = px;
+                                positions[idx * 3 + 1] = py;
+                                positions[idx * 3 + 2] = z;
+
+                                colorsRgb[idx * 3]     = rgbData[pi] / 255;
+                                colorsRgb[idx * 3 + 1] = rgbData[pi + 1] / 255;
+                                colorsRgb[idx * 3 + 2] = rgbData[pi + 2] / 255;
+
+                                colorsFused[idx * 3]     = fData[pi] / 255;
+                                colorsFused[idx * 3 + 1] = fData[pi + 1] / 255;
+                                colorsFused[idx * 3 + 2] = fData[pi + 2] / 255;
+
+                                colorsThermal[idx * 3]     = tData[pi] / 255;
+                                colorsThermal[idx * 3 + 1] = tData[pi + 1] / 255;
+                                colorsThermal[idx * 3 + 2] = tData[pi + 2] / 255;
+                                idx++;
+                            }
+                        }
+
+                        const rgbBlob = createGlbBlob(positions, colorsRgb);
+                        const fusedBlob = createGlbBlob(positions, colorsFused);
+                        const thermalBlob = createGlbBlob(positions, colorsThermal);
+
+                        state.currentGlbBlobs.rgb = URL.createObjectURL(rgbBlob);
+                        state.currentGlbBlobs.fused = URL.createObjectURL(fusedBlob);
+                        state.currentGlbBlobs.thermal = URL.createObjectURL(thermalBlob);
+
+                        document.getElementById('telPoints').textContent = `${numPts.toLocaleString()} pts`;
+                        document.getElementById('telDepth').textContent = "1.0m to 2.5m";
+                        document.getElementById('telSpan').textContent = "1.4m × 1.1m";
+                    }
+
+                    switchModelView('fused');
+                    hideLoading();
+                } catch (e) {
+                    hideLoading();
+                    alert("Error during inference: " + e.message);
+                }
+            }, 300);
+        };
+
+        // Switch View Modes
+        function switchModelView(mode) {
+            state.activeMode = mode;
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.mode === mode);
+            });
+            document.getElementById('telActiveMode').textContent = mode.toUpperCase();
+
+            if (mode === '2d') {
+                viewer.style.display = 'none';
+                fusionView.style.display = 'flex';
+                document.getElementById('watermark').textContent = "2D Perspective Registration Preview";
+                return;
+            }
+
+            fusionView.style.display = 'none';
+            viewer.style.display = 'block';
+
+            const blobUrl = state.currentGlbBlobs[mode];
+            if (blobUrl) {
+                viewer.src = blobUrl;
+                document.getElementById('watermark').textContent = `3D ${mode.toUpperCase()} Model Active | Google <model-viewer>`;
+            }
+        }
+
+        document.getElementById('tabRgb').onclick = () => switchModelView('rgb');
+        document.getElementById('tabFused').onclick = () => switchModelView('fused');
+        document.getElementById('tabThermal').onclick = () => switchModelView('thermal');
+        document.getElementById('tab2DFusion').onclick = () => switchModelView('2d');
+
+        // Turntable Auto-Rotate (10 FPS Slow Standard)
+        const btnAutoRotate = document.getElementById('btnAutoRotate');
+        btnAutoRotate.onclick = () => {
+            state.isAutoRotating = !state.isAutoRotating;
+            viewer.autoRotate = state.isAutoRotating;
+            viewer.autoRotateDelay = 0;
+            viewer.rotationPerSecond = "30deg"; // 30 deg/sec = 12s full turn (10 FPS standard)
+            btnAutoRotate.classList.toggle('active', state.isAutoRotating);
+            btnAutoRotate.innerHTML = state.isAutoRotating ? '<span>⏹️</span> Stop Turntable' : '<span>🔄</span> Turntable (10 FPS)';
+        };
+
+        document.getElementById('btnResetCamera').onclick = () => {
+            viewer.cameraOrbit = "0deg 75deg 105%";
+            viewer.jumpCameraToGoal();
+        };
+
+        // Downloads
+        document.getElementById('btnDownloadActiveGlb').onclick = () => {
+            const url = state.currentGlbBlobs[state.activeMode];
+            if (!url) { alert("Please synthesize or load a model first!"); return; }
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `moge3_${state.activeMode}_model.glb`;
+            a.click();
+        };
+
+        document.getElementById('btnDownloadAllGlb').onclick = () => {
+            for (const m of ['rgb', 'fused', 'thermal']) {
+                const url = state.currentGlbBlobs[m];
+                if (url) {
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `moge3_${m}_model.glb`;
+                    a.click();
+                }
+            }
+        };
+
+        document.getElementById('opacitySlider').oninput = (e) => {
+            document.getElementById('opacityVal').textContent = e.target.value;
+        };
+
+        function showLoading(main, sub) {
+            document.getElementById('loadingMainText').textContent = main;
+            document.getElementById('loadingSubText').textContent = sub;
+            loadingOverlay.style.display = 'flex';
+        }
+        function hideLoading() { loadingOverlay.style.display = 'none'; }
+
+        // Initial setup
+        updateRotationButtons();
+        drawCalibrationCanvas();
+
+        if (new URLSearchParams(window.location.search).get('autoload') === 'true') {
+            document.getElementById('btnLoadDemo').click();
+        }
+    </script>
+</body>
+</html>

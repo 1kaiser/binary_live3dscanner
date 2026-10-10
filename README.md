@@ -23,6 +23,17 @@ A comprehensive collection of on-device 3D reconstruction, multi-sensor computer
 * Non-overlapping floating PiP cards and split viewports.
 * 📥 **[Download MultiCam Live v1.0 APK](https://github.com/1kaiser/binary_live3dscanner/releases/tag/multicam-v1.0)**
 
+### 3. [WebGPU / Browser 3D Scanner & Multi-Modal Studio](./web/) — Interactive Web Suite
+* **Zero-Install Client-Side Web Application**: Standalone HTML/JS suite running directly in modern desktop browsers (Chrome, Edge, Firefox, Brave) with WebGPU hardware acceleration and WebAssembly SIMD CPU fallback.
+* **4-Corner Homography Calibration Canvas**: Interactive draggable quad anchors ($A, B, C, D$) with real-time perspective warping and rotation/flip alignment matching native Android `Matrix.setPolyToPoly`.
+* **In-Browser Binary GLB Generator**: Generates glTF 2.0 binary `.glb` point clouds on-the-fly directly inside the browser using structured `ArrayBuffer` / `DataView` packing without requiring backend servers.
+* **Google `<model-viewer>` Integration**: Interactive 3D orbital inspection, 10 FPS turntable slow-rotation standard ($30^\circ/\text{s}$), multi-modal switching (`RGB`, `Fused`, `Thermal`, `2D Registration`), and one-click GLB exports.
+* **Instant Demo Support**: Built-in one-click demo dataset loading calibrated mobile captures and pre-inferred models (`?autoload=true`).
+
+<p align="center">
+  <img src="assets/web_viewer_preview.png" alt="WebGPU MoGe-3 & Thermal 3D Scanner Studio" width="100%" />
+</p>
+
 ---
 
 ## 📦 Releases

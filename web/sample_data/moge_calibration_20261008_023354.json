@@ -1,0 +1,23 @@
+{
+  "timestamp": "20261008_023354",
+  "thermal_rotation_degrees": 0,
+  "is_flipped_horizontally": false,
+  "corners_normalized": {
+    "A": {
+      "u": 0.15,
+      "v": 0.2
+    },
+    "B": {
+      "u": 0.85,
+      "v": 0.2
+    },
+    "C": {
+      "u": 0.85,
+      "v": 0.8
+    },
+    "D": {
+      "u": 0.15,
+      "v": 0.8
+    }
+  }
+}
