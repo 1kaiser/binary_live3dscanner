@@ -51,6 +51,19 @@ Continuous 360° synchronous turntable inspection showing the three generated 3D
 | **Model:** `moge_scan_<ts>_rgb.glb` | **Model:** `moge_scan_<ts>_fused.glb` | **Model:** `moge_scan_<ts>_thermal.glb` |
 | True-color optical camera RGB texture on metric 3D mesh. | Calibrated Ironbow radiometric heatmap registered over RGB scene context. | Isolated thermal false-color radiometry mapped to metric surface geometry. |
 
+### Dual-Model Benchmark: MoGe-3 Metric vs. MoGe v2 Lightweight (2-Row Matrix)
+
+Synchronous 360° turntable evaluation (10 FPS slow rotation, 12.0s per loop) comparing dense metric reconstruction across models and multi-modal modalities:
+
+<p align="center">
+  <img src="assets/moge_dual_model_2row_rotation.gif" alt="Dual-Model 3D Scanner Benchmark: MoGe-3 vs. MoGe v2 (2-Row Synchronized Turntable)" width="100%" />
+</p>
+
+| Model Architecture | Density & Scale | Column 1: Optical RGB | Column 2: Fused Multi-Modal | Column 3: Radiometric Thermal |
+| :--- | :--- | :--- | :--- | :--- |
+| **Row 1: MoGe-3 Metric** | **112,896 pts** (ViT-L INT8, $0.28\text{--}3.5\text{m}$) | Sharp window mullions, true-scale depth metric coordinates | Sub-pixel registered thermal heatmap onto facade | Isolated thermal geometry with sharp thermal gradient |
+| **Row 2: MoGe v2 Lightweight** | **67,081 pts** (LiteRT FP16, low-RAM) | Smoothed architectural contours, direct Euclidean scaling | Homography overlay on approximate point cloud | Coarse thermal footprint, low memory profile (~200MB RAM) |
+
 ---
 
 ## 🌟 Key Features
