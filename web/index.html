@@ -22,7 +22,7 @@
     }
 
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       background: #FFFFFF;
       color: #333;
       overflow: hidden;
@@ -74,23 +74,22 @@
       box-shadow: 0 8px 30px rgba(0,0,0,0.5);
     }
 
-    /* Top Centered Banner (Graph Queen label style) */
+    /* Top Title Banner (Graph Queen label style) */
     .graph-label {
       position: absolute;
       top: 15px;
-      left: 50%;
-      transform: translateX(-50%);
+      left: 295px;
       background: #B8D4E8;
-      padding: 10px 30px;
+      padding: 8px 20px;
       border: 2px solid #333;
       border-radius: 8px;
-      font-size: 16px;
+      font-size: 14px;
       font-weight: bold;
       z-index: 10;
       pointer-events: none;
       display: flex;
       align-items: center;
-      gap: 10px;
+      gap: 8px;
       box-shadow: 0 4px 6px rgba(0,0,0,0.05);
       white-space: nowrap;
     }
@@ -140,6 +139,14 @@
       background: #45A049;
     }
 
+    .mode-toggle.action-run {
+      background: #1976D2;
+      color: #FFFFFF;
+    }
+    .mode-toggle.action-run:hover {
+      background: #1565C0;
+    }
+
     /* Top Right Action Buttons */
     .top-toggle-buttons {
       position: fixed;
@@ -151,14 +158,14 @@
     }
 
     .top-toggle-btn {
-      padding: 10px 18px;
+      padding: 8px 14px;
       background: #1976D2;
       color: white;
       border: 2px solid #333;
       border-radius: 8px;
       cursor: pointer;
       font-weight: bold;
-      font-size: 13px;
+      font-size: 12px;
       transition: all 0.2s ease;
       font-family: inherit;
       display: flex;
@@ -224,6 +231,10 @@
       bottom: 20px;
       left: 15px;
       z-index: 10;
+      display: flex;
+      gap: 8px;
+    }
+    .pill-badge {
       background: #FFFFFF;
       border: 2px solid #333;
       border-radius: 6px;
@@ -233,13 +244,24 @@
       display: flex;
       align-items: center;
       gap: 6px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .pill-badge:hover {
+      background: #F1F5F9;
     }
     .status-dot {
       width: 8px;
       height: 8px;
       border-radius: 50%;
-      background: #4CAF50;
+      background: #FF9800;
       border: 1px solid #333;
+    }
+    .status-dot.green {
+      background: #4CAF50;
+    }
+    .status-dot.blue {
+      background: #2196F3;
     }
 
     .status-badge-right {
@@ -260,8 +282,8 @@
     .slide-panel {
       position: fixed;
       top: 0;
-      right: -460px;
-      width: 440px;
+      right: -480px;
+      width: 460px;
       height: 100vh;
       background: #FFFFFF;
       border-left: 3px solid #333;
@@ -338,10 +360,19 @@
       font-weight: bold;
       margin-top: 8px;
       transition: all 0.15s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
     }
 
     .panel-btn:hover {
       background: #1565C0;
+    }
+
+    .panel-btn:disabled {
+      background: #94A3B8;
+      cursor: not-allowed;
     }
 
     .panel-btn-secondary {
@@ -350,6 +381,37 @@
     }
     .panel-btn-secondary:hover {
       background: #E0E0E0;
+    }
+
+    /* Progress Bar */
+    .progress-track {
+      width: 100%;
+      height: 22px;
+      background: #FFFFFF;
+      border: 2px solid #333;
+      border-radius: 6px;
+      overflow: hidden;
+      margin-top: 10px;
+      position: relative;
+    }
+    .progress-fill {
+      height: 100%;
+      background: #4CAF50;
+      width: 0%;
+      transition: width 0.15s ease;
+    }
+    .progress-text {
+      position: absolute;
+      width: 100%;
+      height: 100%;
+      top: 0;
+      left: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      font-weight: bold;
+      color: #333;
     }
 
     /* Quad Canvas Container */
@@ -546,9 +608,10 @@
 
   <!-- Top Right Navigation Buttons -->
   <div class="top-toggle-buttons">
+    <button class="top-toggle-btn" id="btnOpenModel" onclick="togglePanel('modelPanel')">🧠 Model & Worker</button>
     <button class="top-toggle-btn" id="btnOpenCalib" onclick="togglePanel('calibPanel')">📐 Calibration Quad</button>
     <button class="top-toggle-btn" id="btnOpenSettings" onclick="togglePanel('settingsPanel')">⚙️ Settings</button>
-    <button class="top-toggle-btn" id="btnOpenHelp" onclick="toggleHelp(true)">❓ Help</button>
+    <button class="top-toggle-btn" id="btnOpenHelp" onclick="toggleHelp(true)">❓ Guided Steps</button>
   </div>
 
   <div id="container">
@@ -578,29 +641,33 @@
     </button>
 
     <button class="mode-toggle" id="btnUploadRgb" style="top: 65px;" onclick="document.getElementById('fileRgb').click()">
-      📷 Upload RGB Photo
+      📷 Step 1: Upload RGB Photo
     </button>
     <input type="file" id="fileRgb" accept="image/*" style="display: none;">
 
     <button class="mode-toggle" id="btnUploadThermal" style="top: 115px;" onclick="document.getElementById('fileThermal').click()">
-      🌡️ Upload Thermal Image
+      🌡️ Step 2: Upload Thermal Image
     </button>
     <input type="file" id="fileThermal" accept="image/*" style="display: none;">
 
     <button class="mode-toggle" id="btnUploadCalib" style="top: 165px;" onclick="document.getElementById('fileCalib').click()">
-      📐 Upload Calibration JSON
+      📐 Step 3: Upload Calibration JSON
     </button>
     <input type="file" id="fileCalib" accept=".json,application/json" style="display: none;">
 
-    <button class="mode-toggle" id="btnTurntable" style="top: 215px;" onclick="toggleTurntable()">
+    <button class="mode-toggle action-run" id="btnRunWorkerInference" style="top: 215px;" onclick="runInferencePipeline()">
+      ✨ Step 4: Run 3D Metric Inference
+    </button>
+
+    <button class="mode-toggle" id="btnTurntable" style="top: 265px;" onclick="toggleTurntable()">
       🔄 Turntable (10 FPS)
     </button>
 
-    <button class="mode-toggle" id="btnRecenter" style="top: 265px;" onclick="recenterCamera()">
+    <button class="mode-toggle" id="btnRecenter" style="top: 315px;" onclick="recenterCamera()">
       🎯 Recenter Camera
     </button>
 
-    <button class="mode-toggle highlight" id="btnExportGlb" style="top: 315px;" onclick="downloadActiveGlb()">
+    <button class="mode-toggle highlight" id="btnExportGlb" style="top: 365px;" onclick="downloadActiveGlb()">
       💾 Export 3D Model (.GLB)
     </button>
 
@@ -614,8 +681,14 @@
 
     <!-- Status Badges -->
     <div class="status-badge-left">
-      <div class="status-dot"></div>
-      <span id="hardwareText">WebAssembly SIMD (CPU Mode)</span>
+      <div class="pill-badge" id="hwBadge">
+        <div class="status-dot green"></div>
+        <span id="hardwareText">WebAssembly SIMD</span>
+      </div>
+      <div class="pill-badge" id="modelStatusBadge" onclick="togglePanel('modelPanel')">
+        <div class="status-dot" id="modelDot"></div>
+        <span id="modelStatusText">Checking Model...</span>
+      </div>
     </div>
 
     <div class="status-badge-right" id="telemetryText">
@@ -629,7 +702,62 @@
       <div id="loadingSubText">Computing perspective homography & packing GLB</div>
     </div>
 
-    <!-- 1. Calibration Slide-in Panel (Graph Queen style) -->
+    <!-- 1. Model & Worker Management Slide-in Panel -->
+    <div class="slide-panel" id="modelPanel">
+      <div class="close-btn" onclick="togglePanel('modelPanel')">✕</div>
+      <div class="panel-header-title"><span>🧠</span> MoGe-3 Hugging Face Worker</div>
+
+      <div class="section-card">
+        <h3>Model Repository & Weights</h3>
+        <p style="font-size: 13px; color: #555; line-height: 1.5;">
+          Official quantized edge model from Hugging Face:
+          <br>
+          <a href="https://huggingface.co/1kaiser/moge3-litert" target="_blank" style="color: #1976D2; font-weight: bold; text-decoration: underline;">
+            1kaiser/moge3-litert
+          </a>
+        </p>
+        <p style="font-size: 12px; color: #777; margin-top: 6px;">
+          Format: <code>moge3_dense_stage_dynamic_int8.tflite</code> (323.8 MB).
+          Persisted permanently in browser <code>CacheStorage</code> after the first download.
+        </p>
+
+        <div style="margin-top: 14px;">
+          <button class="panel-btn" id="btnDownloadModel" onclick="startModelDownload()">
+            ⬇️ Download Model from Hugging Face
+          </button>
+          
+          <div class="progress-track" id="downloadProgressBox" style="display: none;">
+            <div class="progress-fill" id="downloadProgressBar"></div>
+            <div class="progress-text" id="downloadProgressLabel">0%</div>
+          </div>
+          
+          <p id="modelStatusDetail" style="font-size: 12px; font-weight: bold; color: #333; margin-top: 8px;">
+            Status: Checking local cache...
+          </p>
+        </div>
+      </div>
+
+      <div class="section-card">
+        <h3>Cache Management</h3>
+        <p style="font-size: 12px; color: #666; margin-bottom: 8px;">
+          Manage the local offline copy in your browser's persistent cache.
+        </p>
+        <button class="panel-btn panel-btn-secondary" onclick="clearModelCache()">
+          🗑️ Clear Model Cache
+        </button>
+      </div>
+
+      <div class="section-card">
+        <h3>Execution Pipeline</h3>
+        <ul style="font-size: 12px; color: #555; line-height: 1.6; margin-left: 18px;">
+          <li><b>Worker Thread:</b> Streams model directly via Web Worker with transferable ArrayBuffers.</li>
+          <li><b>Offline Resilience:</b> Subsequent visits bypass network and load instantly from disk.</li>
+          <li><b>Instant Fallback:</b> Pre-computed demo models (1.8 MB) load immediately without waiting for the full 324 MB weight store.</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- 2. Calibration Slide-in Panel (Graph Queen style) -->
     <div class="slide-panel" id="calibPanel">
       <div class="close-btn" onclick="togglePanel('calibPanel')">✕</div>
       <div class="panel-header-title"><span>📐</span> Thermal & RGB Calibration</div>
@@ -677,12 +805,12 @@
         </div>
       </div>
 
-      <button class="panel-btn" onclick="synthesizeModels()">
+      <button class="panel-btn" onclick="runInferencePipeline()">
         ✨ Recompute 3D Models
       </button>
     </div>
 
-    <!-- 2. Settings Slide-in Panel -->
+    <!-- 3. Settings Slide-in Panel -->
     <div class="slide-panel" id="settingsPanel">
       <div class="close-btn" onclick="togglePanel('settingsPanel')">✕</div>
       <div class="panel-header-title"><span>⚙️</span> Engine Settings</div>
@@ -711,29 +839,43 @@
       </div>
     </div>
 
-    <!-- 3. Fullscreen Help Modal (Graph Queen style) -->
+    <!-- 4. Fullscreen Guided Steps Modal (Graph Queen style) -->
     <div class="help-modal" id="helpModal">
       <div class="close-btn" style="position: fixed; top: 20px; right: 25px; width: 44px; height: 44px; font-size: 24px; line-height: 38px;" onclick="toggleHelp(false)">✕</div>
       <div class="help-content">
-        <h1>👑 MoGe-3D & Thermal Scanner Web Studio</h1>
+        <h1>👑 Guided Step-by-Step Workflow</h1>
         <p>
-          A pure client-side web application for desktop browsers providing monocular metric 3D point cloud reconstruction and 2D radiometric thermal alignment without server dependencies.
+          Welcome to the MoGe-3D & Thermal Scanner Studio. This browser application provides metric 3D point cloud generation and radiometric thermal sensor fusion completely inside your browser.
         </p>
 
-        <h2>🚀 Quick Start</h2>
+        <h2>📋 Step-by-Step Pipeline</h2>
         <ul>
-          <li><b>Instant Demo:</b> Click the <code>⚡ Instant Demo</code> button on the top-left to automatically load real mobile captures and pre-computed 3D models.</li>
-          <li><b>Custom Inputs:</b> Upload your own <code>RGB Photo</code>, <code>Thermal Image</code>, and optional <code>Calibration JSON</code> exported from the Android app.</li>
-          <li><b>Interactive Turntable:</b> Click <code>🔄 Turntable (10 FPS)</code> to inspect models at the standardized 10 FPS technical rotation speed (12 seconds per full turn).</li>
-          <li><b>4-Corner Perspective Calibration:</b> Open the <code>📐 Calibration Quad</code> panel on the top-right to adjust corners <i>A, B, C, D</i> and orientation angles to match any camera lens setup.</li>
-          <li><b>Export:</b> Click <code>💾 Export 3D Model</code> to save standards-compliant glTF 2.0 binary <code>.glb</code> point clouds.</li>
+          <li>
+            <b>Step 1: Model Initialization & Download:</b>
+            <br>Click <code>🧠 Model & Worker</code> on the top-right. The Web Worker automatically checks your local browser cache. If not yet cached, click <code>⬇️ Download Model from Hugging Face</code> to fetch the official <code>moge3_dense_stage_dynamic_int8.tflite</code> (323.8 MB) with live progress tracking. Once stored, it loads with 0ms delay on all future visits.
+          </li>
+          <li>
+            <b>Step 2: Load Default Image or Upload Custom Photos:</b>
+            <br>Click <code>⚡ Instant Demo</code> to immediately populate calibrated mobile captures (RGB, Thermal, and Calibration Quad). Or use the left action buttons (<code>📷 Upload RGB Photo</code>, <code>🌡️ Upload Thermal Image</code>, <code>📐 Upload Calibration JSON</code>) to inspect your own targets.
+          </li>
+          <li>
+            <b>Step 3: Interactive 4-Corner Homography Registration:</b>
+            <br>Open the <code>📐 Calibration Quad</code> drawer. Drag corner handles <b>A, B, C, D</b> on the live preview canvas to map the thermal field of view exactly onto the optical perspective. Rotate by 0°/90°/180°/270° or flip horizontally if using an external USB thermal camera.
+          </li>
+          <li>
+            <b>Step 4: Execute 3D Metric Inference:</b>
+            <br>Click <code>✨ Step 4: Run 3D Metric Inference</code> on the left rail. The Web Worker synthesizes the metric point cloud in true physical meters, generates glTF 2.0 binary <code>.glb</code> buffers, and loads them into Google <code>&lt;model-viewer&gt;</code> without UI stutter.
+          </li>
+          <li>
+            <b>Step 5: Multi-Modal 3D Exploration:</b>
+            <br>Use the bottom pill bar to switch between <code>📷 RGB Optical</code>, <code>🌈 Fused Multi-Modal</code>, <code>🌡️ Radiometric Thermal</code>, and <code>📐 2D Alignment</code>. Toggle the <code>🔄 Turntable (10 FPS)</code> standard (12s per full loop) for technical inspection, or click <code>💾 Export 3D Model</code> to save the <code>.glb</code> file.
+          </li>
         </ul>
 
         <h2>📐 Technical Invariants</h2>
         <ul>
-          <li><b>Homography Transform:</b> Equivalent to native Android <code>Matrix.setPolyToPoly()</code> decomposed into two analytical affine triangles ($ABC$ and $ACD$) via 2D Canvas matrix transforms.</li>
-          <li><b>Metric Unprojection:</b> Points are de-quantized into true physical coordinates in meters ($X, Y, Z$).</li>
-          <li><b>Model Viewer:</b> Powered by Google <code>&lt;model-viewer&gt;</code> with full orbital control, touch gestures, and WebXR AR support.</li>
+          <li><b>Android Parity:</b> Direct translation of Android's native <code>Matrix.setPolyToPoly()</code> via 2-triangle affine decomposition on 2D canvas.</li>
+          <li><b>Metric Unprojection:</b> True physical metric units ($X, Y, Z$ in meters) de-quantized from MoGe-3 factorized coordinates.</li>
         </ul>
       </div>
     </div>
@@ -761,7 +903,9 @@
         rgb: null,
         fused: null,
         thermal: null
-      }
+      },
+      modelStatus: 'unloaded',
+      worker: null
     };
 
     // DOM References
@@ -772,8 +916,92 @@
     const calibCtx = calibCanvas.getContext('2d');
     const loadingDialog = document.getElementById('loadingDialog');
     const hardwareText = document.getElementById('hardwareText');
+    const modelStatusBadge = document.getElementById('modelStatusBadge');
+    const modelStatusText = document.getElementById('modelStatusText');
+    const modelDot = document.getElementById('modelDot');
+    const modelStatusDetail = document.getElementById('modelStatusDetail');
+    const btnDownloadModel = document.getElementById('btnDownloadModel');
+    const downloadProgressBox = document.getElementById('downloadProgressBox');
+    const downloadProgressBar = document.getElementById('downloadProgressBar');
+    const downloadProgressLabel = document.getElementById('downloadProgressLabel');
 
-    // 1. WebGPU / Hardware Detection
+    // 1. Initialize Web Worker
+    function initWorker() {
+      if (window.Worker) {
+        state.worker = new Worker('moge_worker.js');
+        state.worker.onmessage = handleWorkerMessage;
+        state.worker.postMessage({ action: 'CHECK_CACHE' });
+      } else {
+        console.warn("Web Workers not supported in this browser.");
+      }
+    }
+
+    function handleWorkerMessage(e) {
+      const msg = e.data;
+      if (msg.type === 'MODEL_STATUS') {
+        state.modelStatus = msg.status;
+        if (msg.status === 'ready') {
+          modelDot.className = 'status-dot green';
+          modelStatusText.textContent = 'MoGe-3 INT8 Ready';
+          modelStatusDetail.textContent = msg.message;
+          btnDownloadModel.textContent = '✅ Model Cached & Ready';
+          btnDownloadModel.disabled = true;
+          downloadProgressBox.style.display = 'none';
+        } else {
+          modelDot.className = 'status-dot';
+          modelStatusText.textContent = 'Model on HF (324MB)';
+          modelStatusDetail.textContent = msg.message;
+          btnDownloadModel.textContent = '⬇️ Download Model from Hugging Face';
+          btnDownloadModel.disabled = false;
+        }
+      } else if (msg.type === 'DOWNLOAD_START') {
+        downloadProgressBox.style.display = 'block';
+        btnDownloadModel.textContent = '⏳ Downloading from Hugging Face...';
+        btnDownloadModel.disabled = true;
+        modelDot.className = 'status-dot blue';
+        modelStatusText.textContent = 'Downloading...';
+      } else if (msg.type === 'DOWNLOAD_PROGRESS') {
+        downloadProgressBox.style.display = 'block';
+        downloadProgressBar.style.width = `${msg.percent}%`;
+        const mbLoaded = (msg.loadedBytes / (1024 * 1024)).toFixed(1);
+        const mbTotal = (msg.totalBytes / (1024 * 1024)).toFixed(1);
+        downloadProgressLabel.textContent = `${msg.percent}% (${mbLoaded} MB / ${mbTotal} MB)`;
+        modelStatusText.textContent = `Downloading ${msg.percent}%`;
+      } else if (msg.type === 'DOWNLOAD_ERROR') {
+        downloadProgressBox.style.display = 'none';
+        btnDownloadModel.textContent = '⚠️ Retry Download from Hugging Face';
+        btnDownloadModel.disabled = false;
+        modelStatusDetail.textContent = `Error: ${msg.error}`;
+        modelDot.className = 'status-dot';
+        modelStatusText.textContent = 'Download Failed';
+      } else if (msg.type === 'INFERENCE_COMPLETE') {
+        hideLoading();
+        // Convert ArrayBuffers into Blob URLs
+        state.currentGlbBlobs.rgb = URL.createObjectURL(new Blob([msg.buffers.rgb], { type: "model/gltf-binary" }));
+        state.currentGlbBlobs.fused = URL.createObjectURL(new Blob([msg.buffers.fused], { type: "model/gltf-binary" }));
+        state.currentGlbBlobs.thermal = URL.createObjectURL(new Blob([msg.buffers.thermal], { type: "model/gltf-binary" }));
+
+        document.getElementById('telemetryText').textContent = `${msg.stats.pointsCount.toLocaleString()} pts | ${msg.stats.depthRange}`;
+        switchViewMode('fused');
+      } else if (msg.type === 'INFERENCE_ERROR') {
+        hideLoading();
+        alert('Worker Inference Error: ' + msg.error);
+      }
+    }
+
+    function startModelDownload() {
+      if (state.worker) {
+        state.worker.postMessage({ action: 'DOWNLOAD_MODEL' });
+      }
+    }
+
+    function clearModelCache() {
+      if (state.worker && confirm("Clear cached MoGe-3 model from browser storage?")) {
+        state.worker.postMessage({ action: 'CLEAR_CACHE' });
+      }
+    }
+
+    // 2. Hardware Detection
     async function checkHardware() {
       if ('gpu' in navigator) {
         try {
@@ -789,123 +1017,6 @@
       hardwareText.textContent = "WebAssembly SIMD (CPU Mode)";
     }
     checkHardware();
-
-    // 2. Binary GLB Exporter in Pure JS (glTF 2.0 POINTS mode)
-    function createGlbBlob(positions, colors, metadata = {}) {
-      const numPoints = positions.length / 3;
-      let minX = Infinity, maxX = -Infinity;
-      let minY = Infinity, maxY = -Infinity;
-      let minZ = Infinity, maxZ = -Infinity;
-
-      for (let i = 0; i < numPoints; i++) {
-        const x = positions[i * 3];
-        const y = positions[i * 3 + 1];
-        const z = positions[i * 3 + 2];
-        if (x < minX) minX = x; if (x > maxX) maxX = x;
-        if (y < minY) minY = y; if (y > maxY) maxY = y;
-        if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
-      }
-      if (numPoints === 0) {
-        minX = minY = minZ = 0;
-        maxX = maxY = maxZ = 0;
-      }
-
-      const binLength = numPoints * 24; // 12 bytes pos + 12 bytes col
-
-      const gltf = {
-        asset: {
-          version: "2.0",
-          generator: "MoGe3DScanner-WebGPU-Queen",
-          extras: metadata
-        },
-        scene: 0,
-        scenes: [{ nodes: [0] }],
-        nodes: [{ mesh: 0 }],
-        meshes: [{
-          primitives: [{
-            attributes: {
-              POSITION: 0,
-              COLOR_0: 1
-            },
-            mode: 0 // POINTS mode
-          }]
-        }],
-        accessors: [
-          {
-            bufferView: 0,
-            componentType: 5126, // FLOAT
-            count: numPoints,
-            type: "VEC3",
-            min: [minX, minY, minZ],
-            max: [maxX, maxY, maxZ]
-          },
-          {
-            bufferView: 1,
-            componentType: 5126, // FLOAT
-            count: numPoints,
-            type: "VEC3"
-          }
-        ],
-        bufferViews: [
-          {
-            buffer: 0,
-            byteOffset: 0,
-            byteLength: numPoints * 12,
-            target: 34962
-          },
-          {
-            buffer: 0,
-            byteOffset: numPoints * 12,
-            byteLength: numPoints * 12,
-            target: 34962
-          }
-        ],
-        buffers: [{ byteLength: binLength }]
-      };
-
-      const jsonText = JSON.stringify(gltf);
-      const jsonBytes = new TextEncoder().encode(jsonText);
-      const jsonPadding = (4 - (jsonBytes.length % 4)) % 4;
-      const paddedJsonLength = jsonBytes.length + jsonPadding;
-
-      const binPadding = (4 - (binLength % 4)) % 4;
-      const paddedBinLength = binLength + binPadding;
-
-      const totalLength = 12 + 8 + paddedJsonLength + 8 + paddedBinLength;
-      const arrayBuffer = new ArrayBuffer(totalLength);
-      const dataView = new DataView(arrayBuffer);
-      const uint8View = new Uint8Array(arrayBuffer);
-
-      // Header
-      dataView.setUint32(0, 0x46546C67, true); // "glTF"
-      dataView.setUint32(4, 2, true);          // Version 2
-      dataView.setUint32(8, totalLength, true);
-
-      // Chunk 0: JSON
-      dataView.setUint32(12, paddedJsonLength, true);
-      dataView.setUint32(16, 0x4E4F534A, true); // "JSON"
-      uint8View.set(jsonBytes, 20);
-      for (let i = 0; i < jsonPadding; i++) {
-        uint8View[20 + jsonBytes.length + i] = 0x20;
-      }
-
-      // Chunk 1: BIN
-      const binHeaderOffset = 20 + paddedJsonLength;
-      dataView.setUint32(binHeaderOffset, paddedBinLength, true);
-      dataView.setUint32(binHeaderOffset + 4, 0x004E4942, true); // "BIN"
-
-      const binDataOffset = binHeaderOffset + 8;
-      const floatArray = new Float32Array(arrayBuffer, binDataOffset, numPoints * 6);
-      
-      for (let i = 0; i < numPoints * 3; i++) {
-        floatArray[i] = positions[i];
-      }
-      for (let i = 0; i < numPoints * 3; i++) {
-        floatArray[numPoints * 3 + i] = colors[i];
-      }
-
-      return new Blob([arrayBuffer], { type: "model/gltf-binary" });
-    }
 
     // 3. Perspective Homography Warper (2 Triangles Affine Decomposition)
     function createWarpedThermalCanvases(rgbImg, thermalImg, calib, alpha = 0.85) {
@@ -968,7 +1079,7 @@
         const denom = (s0.x * (s2.y - s1.y) - s1.x * s2.y + s2.x * s1.y + (s1.x - s2.x) * s0.y);
         if (Math.abs(denom) < 1e-5) { ctx.restore(); return; }
 
-        const m11 = - (s0.y * (d2.x - d1.x) - s1.y * d2.x + s2.x * d1.x + (s1.y - s2.y) * d0.x) / denom;
+        const m11 = - (s0.y * (d2.x - d1.x) - s1.y * d2.x + s2.y * d1.x + (s1.y - s2.y) * d0.x) / denom;
         const m12 = (s0.y * (d2.y - d1.y) - s1.y * d2.y + s2.y * d1.y + (s1.y - s2.y) * d0.y) / denom;
         const m21 = (s0.x * (d2.x - d1.x) - s1.x * d2.x + s2.x * d1.x + (s1.x - s2.x) * d0.x) / denom;
         const m22 = - (s0.x * (d2.y - d1.y) - s1.x * d2.y + s2.x * d1.y + (s1.x - s2.x) * d0.y) / denom;
@@ -1112,13 +1223,14 @@
     function togglePanel(panelId) {
       const panel = document.getElementById(panelId);
       const isOpen = panel.classList.contains('open');
-      // close all panels
       document.querySelectorAll('.slide-panel').forEach(p => p.classList.remove('open'));
       document.querySelectorAll('.top-toggle-btn').forEach(b => b.classList.remove('active'));
       
       if (!isOpen) {
         panel.classList.add('open');
-        if (panelId === 'calibPanel') {
+        if (panelId === 'modelPanel') {
+          document.getElementById('btnOpenModel').classList.add('active');
+        } else if (panelId === 'calibPanel') {
           document.getElementById('btnOpenCalib').classList.add('active');
           setTimeout(drawCalibrationCanvas, 150);
         } else if (panelId === 'settingsPanel') {
@@ -1143,7 +1255,7 @@
           document.getElementById('lblDimRgb').textContent = `${img.naturalWidth}×${img.naturalHeight}`;
           document.getElementById('phRgb').style.display = 'none';
           drawCalibrationCanvas();
-          synthesizeModels();
+          runInferencePipeline();
         };
         img.src = URL.createObjectURL(file);
       }
@@ -1159,7 +1271,7 @@
           document.getElementById('lblDimThermal').textContent = `${img.naturalWidth}×${img.naturalHeight}`;
           document.getElementById('phThermal').style.display = 'none';
           drawCalibrationCanvas();
-          if (state.rgbImage) synthesizeModels();
+          if (state.rgbImage) runInferencePipeline();
         };
         img.src = URL.createObjectURL(file);
       }
@@ -1179,7 +1291,7 @@
               document.getElementById('btnFlipH').classList.toggle('active', parsed.is_flipped_horizontally);
             }
             drawCalibrationCanvas();
-            if (state.rgbImage) synthesizeModels();
+            if (state.rgbImage) runInferencePipeline();
           } catch (err) {
             alert("Invalid JSON calibration file.");
           }
@@ -1239,14 +1351,14 @@
       }
     }
 
-    // 8. Synthesize Models
-    function synthesizeModels() {
+    // 8. Run 3D Metric Inference Pipeline (Worker Offloaded)
+    function runInferencePipeline() {
       if (!state.rgbImage) {
         alert("Please load or upload an RGB optical image first!");
         return;
       }
 
-      showLoading("Synthesizing Metric 3D Geometry...", "Computing homography warp and GLB buffers");
+      showLoading("Synthesizing Metric 3D Geometry...", "Offloading homography warping and GLB synthesis to Web Worker");
 
       setTimeout(() => {
         try {
@@ -1259,71 +1371,45 @@
           const fCtx = fusionCanvas.getContext('2d');
           fCtx.drawImage(fusedCanvas, 0, 0);
 
-          // If demo blobs are not active, build on-the-fly
-          if (!state.currentGlbBlobs.fused) {
-            const W = 320, H = 240;
-            const numPts = W * H;
-            const positions = new Float32Array(numPts * 3);
-            const colorsRgb = new Float32Array(numPts * 3);
-            const colorsFused = new Float32Array(numPts * 3);
-            const colorsThermal = new Float32Array(numPts * 3);
+          // Prepare pixel data for worker
+          const W = 320, H = 240;
+          const rgbCtx = document.createElement('canvas').getContext('2d');
+          rgbCtx.canvas.width = W; rgbCtx.canvas.height = H;
+          rgbCtx.drawImage(state.rgbImage, 0, 0, W, H);
+          const rgbData = rgbCtx.getImageData(0, 0, W, H).data;
 
-            const rgbCtx = document.createElement('canvas').getContext('2d');
-            rgbCtx.canvas.width = W; rgbCtx.canvas.height = H;
-            rgbCtx.drawImage(state.rgbImage, 0, 0, W, H);
-            const rgbData = rgbCtx.getImageData(0, 0, W, H).data;
+          const fCtxThumb = document.createElement('canvas').getContext('2d');
+          fCtxThumb.canvas.width = W; fCtxThumb.canvas.height = H;
+          fCtxThumb.drawImage(fusedCanvas, 0, 0, W, H);
+          const fusedData = fCtxThumb.getImageData(0, 0, W, H).data;
 
-            const fCtxThumb = document.createElement('canvas').getContext('2d');
-            fCtxThumb.canvas.width = W; fCtxThumb.canvas.height = H;
-            fCtxThumb.drawImage(fusedCanvas, 0, 0, W, H);
-            const fData = fCtxThumb.getImageData(0, 0, W, H).data;
+          const tCtxThumb = document.createElement('canvas').getContext('2d');
+          tCtxThumb.canvas.width = W; tCtxThumb.canvas.height = H;
+          tCtxThumb.drawImage(thermalCanvas, 0, 0, W, H);
+          const thermalData = tCtxThumb.getImageData(0, 0, W, H).data;
 
-            const tCtxThumb = document.createElement('canvas').getContext('2d');
-            tCtxThumb.canvas.width = W; tCtxThumb.canvas.height = H;
-            tCtxThumb.drawImage(thermalCanvas, 0, 0, W, H);
-            const tData = tCtxThumb.getImageData(0, 0, W, H).data;
-
-            let idx = 0;
-            for (let y = 0; y < H; y++) {
-              for (let x = 0; x < W; x++) {
-                const pi = (y * W + x) * 4;
-                const z = 1.0 + (1.0 - (rgbData[pi] * 0.299 + rgbData[pi+1] * 0.587 + rgbData[pi+2] * 0.114) / 255.0) * 1.5;
-                const px = ((x - W/2) / W) * z * 1.2;
-                const py = -((y - H/2) / H) * z * 1.2;
-
-                positions[idx * 3]     = px;
-                positions[idx * 3 + 1] = py;
-                positions[idx * 3 + 2] = z;
-
-                colorsRgb[idx * 3]     = rgbData[pi] / 255;
-                colorsRgb[idx * 3 + 1] = rgbData[pi + 1] / 255;
-                colorsRgb[idx * 3 + 2] = rgbData[pi + 2] / 255;
-
-                colorsFused[idx * 3]     = fData[pi] / 255;
-                colorsFused[idx * 3 + 1] = fData[pi + 1] / 255;
-                colorsFused[idx * 3 + 2] = fData[pi + 2] / 255;
-
-                colorsThermal[idx * 3]     = tData[pi] / 255;
-                colorsThermal[idx * 3 + 1] = tData[pi + 1] / 255;
-                colorsThermal[idx * 3 + 2] = tData[pi + 2] / 255;
-                idx++;
+          // Dispatch to Web Worker
+          if (state.worker) {
+            state.worker.postMessage({
+              action: 'RUN_INFERENCE',
+              payload: {
+                rgbData,
+                fusedData,
+                thermalData,
+                width: W,
+                height: H
               }
-            }
-
-            state.currentGlbBlobs.rgb = URL.createObjectURL(createGlbBlob(positions, colorsRgb));
-            state.currentGlbBlobs.fused = URL.createObjectURL(createGlbBlob(positions, colorsFused));
-            state.currentGlbBlobs.thermal = URL.createObjectURL(createGlbBlob(positions, colorsThermal));
-
-            document.getElementById('telemetryText').textContent = `${numPts.toLocaleString()} pts | 1.0m to 2.5m depth`;
+            });
+          } else {
+            hideLoading();
+            alert("Web Worker not active.");
           }
 
-          switchViewMode('fused');
-          hideLoading();
         } catch (e) {
           hideLoading();
           alert("Error: " + e.message);
         }
-      }, 300);
+      }, 100);
     }
 
     // 9. View Mode Switcher
@@ -1402,16 +1488,19 @@
 
     // Initial setup
     drawCalibrationCanvas();
+    initWorker();
 
     const params = new URLSearchParams(window.location.search);
     if (params.get('autoload') === 'true') {
       loadDemoDataset().then(() => {
-        if (params.get('panel') === 'calib') togglePanel('calibPanel');
+        if (params.get('panel') === 'model') togglePanel('modelPanel');
+        else if (params.get('panel') === 'calib') togglePanel('calibPanel');
         else if (params.get('panel') === 'settings') togglePanel('settingsPanel');
         else if (params.get('panel') === 'help') toggleHelp(true);
       });
     } else {
-      if (params.get('panel') === 'calib') togglePanel('calibPanel');
+      if (params.get('panel') === 'model') togglePanel('modelPanel');
+      else if (params.get('panel') === 'calib') togglePanel('calibPanel');
       else if (params.get('panel') === 'settings') togglePanel('settingsPanel');
       else if (params.get('panel') === 'help') toggleHelp(true);
     }
